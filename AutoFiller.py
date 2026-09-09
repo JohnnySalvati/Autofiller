@@ -15,6 +15,9 @@ import time
 import socket
 import sys
 import unicodedata
+import os
+import shutil
+import threading
 
 
 # Tipo de comprobante: codigo de ARCA -> value del combo #vTIPOCOMPROBANTECODIGO.
@@ -363,7 +366,7 @@ CAMPOS_CABECERA = {
 }
 
 
-async def mostrar_avisos_en_pantalla(page, avisos):
+async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
     """Muestra los avisos como un cartel dentro de la propia pantalla de SISalud.
 
     Un messagebox de Windows aparece detras de la ventana del navegador que el
@@ -371,22 +374,35 @@ async def mostrar_avisos_en_pantalla(page, avisos):
     El cartel va inyectado en la pagina, fijo arriba de todo, donde si lo ve
     antes de confirmar. El titulo del comprobante va abajo (el cartel arriba), y
     el boton Confirmar esta al pie, asi que no lo tapa.
+
+    En modo carpeta (lote = {indice, total, archivo}) el cartel se muestra
+    siempre: lleva el progreso, los botones "Siguiente comprobante" y "Detener
+    lote", y engancha Confirmar (click o F12) y Cancelar de SISalud para saber
+    cual toco el operador. Todo avisa a Python por window.autofillerAccion.
     """
-    if not avisos:
+    if not avisos and not lote:
         return
     try:
         await page.evaluate(
-            """(avisos) => {
+            """([avisos, lote]) => {
                 const previo = document.getElementById('autofiller-avisos');
                 if (previo) previo.remove();
+                const hayAvisos = avisos.length > 0;
                 const caja = document.createElement('div');
                 caja.id = 'autofiller-avisos';
                 caja.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
-                    + 'background:#b91c1c;color:#fff;font:14px/1.45 Segoe UI,sans-serif;'
+                    + 'background:' + (hayAvisos ? '#b91c1c' : '#1d4ed8') + ';color:#fff;'
+                    + 'font:14px/1.45 Segoe UI,sans-serif;'
                     + 'padding:12px 46px 14px 18px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
                 const titulo = document.createElement('div');
                 titulo.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:6px';
-                titulo.textContent = 'AutoFiller \\u2014 revisar antes de Confirmar:';
+                if (lote) {
+                    titulo.textContent = 'AutoFiller \u2014 comprobante ' + lote.indice + ' de '
+                        + lote.total + ': ' + lote.archivo
+                        + (hayAvisos ? ' \u2014 revisar antes de Confirmar:' : '');
+                } else {
+                    titulo.textContent = 'AutoFiller \u2014 revisar antes de Confirmar:';
+                }
                 caja.appendChild(titulo);
                 const ul = document.createElement('ul');
                 ul.style.cssText = 'margin:0;padding-left:22px';
@@ -397,16 +413,48 @@ async def mostrar_avisos_en_pantalla(page, avisos):
                     ul.appendChild(li);
                 });
                 caja.appendChild(ul);
+                if (lote) {
+                    const pie = document.createElement('div');
+                    pie.style.cssText = 'margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+                    const nota = document.createElement('span');
+                    nota.textContent = 'Revis\u00e1 y toc\u00e1 Confirmar o Cancelar en SISalud: '
+                        + 'al terminar se carga el siguiente.';
+                    pie.appendChild(nota);
+                    const boton = (texto, accion) => {
+                        const b = document.createElement('button');
+                        b.type = 'button';
+                        b.textContent = texto;
+                        b.style.cssText = 'background:#fff;color:#111;border:0;border-radius:4px;'
+                            + 'padding:5px 12px;font:600 13px Segoe UI,sans-serif;cursor:pointer';
+                        b.onclick = () => { b.disabled = true; window.autofillerAccion(accion); };
+                        return b;
+                    };
+                    pie.appendChild(boton('Siguiente comprobante (saltar este)', 'saltar'));
+                    pie.appendChild(boton('Detener lote', 'detener'));
+                    caja.appendChild(pie);
+                    // Enganchar los botones de SISalud para saber cual toco el operador.
+                    const confirmar = document.querySelector('input[name="CONFIRMAR"]');
+                    if (confirmar) confirmar.addEventListener('click',
+                        () => window.autofillerAccion('confirmar'), true);
+                    const cancelar = document.querySelector('input[name="BUTTON2"]');
+                    if (cancelar) cancelar.addEventListener('click',
+                        () => window.autofillerAccion('cancelar'), true);
+                    document.addEventListener('keydown', e => {
+                        if (e.key === 'F12') window.autofillerAccion('confirmar');
+                    }, true);
+                }
                 const cerrar = document.createElement('button');
-                cerrar.textContent = '\\u00d7';
-                cerrar.title = 'Cerrar aviso';
+                cerrar.textContent = '\u00d7';
+                cerrar.title = lote ? 'Ocultar avisos' : 'Cerrar aviso';
                 cerrar.style.cssText = 'position:absolute;top:8px;right:14px;background:transparent;'
                     + 'border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer';
-                cerrar.onclick = () => caja.remove();
+                // En modo carpeta solo se ocultan los avisos: el progreso y los
+                // botones del lote tienen que seguir a la vista.
+                cerrar.onclick = () => lote ? ul.remove() : caja.remove();
                 caja.appendChild(cerrar);
                 document.body.appendChild(caja);
             }""",
-            avisos,
+            [avisos, lote],
         )
     except Exception:
         # El cartel es un extra: si la pagina no permite inyectarlo, seguimos.
@@ -453,13 +501,21 @@ async def provincia_en_sisalud(page):
     return provincia
 
 
-async def main(usuario, contraseña, factura):
+URL_CARGA = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra?10,0"
+CDP_URL = "http://localhost:9222"
+
+
+def lanzar_chrome():
+    """Levanta Chrome con el puerto de depuracion y espera a que responda.
+
+    Si Chrome ya esta abierto con el mismo perfil, solo reutiliza esa instancia
+    (no abre otra), asi que se puede llamar en cada corrida.
+    """
     chrome_path = r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
     user_data_dir = r"C:\\ChromeProfile"
     debugging_port = 9222
 
-
-    chrome_process = subprocess.Popen([
+    subprocess.Popen([
         chrome_path,
         f"--remote-debugging-port={debugging_port}",
         f"--user-data-dir={user_data_dir}",
@@ -467,116 +523,333 @@ async def main(usuario, contraseña, factura):
         "--no-default-browser-check"
     ], shell=True)
 
-    # Función para verificar si el puerto está abierto
     def is_port_open(host: str, port: int, timeout: float = 0.5) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(timeout)
             return sock.connect_ex((host, port)) == 0
 
-    # Esperar hasta que el puerto 9222 esté disponible
     while not is_port_open("localhost", debugging_port):
         time.sleep(0.5)
 
+
+async def abrir_pantalla(page, usuario, contraseña):
+    """Lleva la pestaña a la Carga Rapida, logueando solo si hace falta."""
+    await page.goto(URL_CARGA)
+
+    # Login solo si aparece la pantalla de ingreso (la sesión puede seguir
+    # abierta de una corrida anterior).
+    caja_usuario = page.get_by_role("textbox", name="ingrese con la forma: usuario")
+    if await caja_usuario.count() > 0:
+        await caja_usuario.fill(usuario)
+        await page.locator("input[name=\"W0030vPASS\"]").fill(contraseña)
+        await page.get_by_role("button", name="entrar").click()
+        await page.wait_for_load_state("networkidle")
+        # Ya autenticado, se va directo a la pantalla de carga con un goto, en
+        # vez de clickear el menú Prestadores → Carga Rapida Comprobantes (esos
+        # clicks a veces no avanzan y el operador tiene que darlos a mano).
+        await page.goto(URL_CARGA)
+
+    await esperar_genexus(page)
+
+
+async def cargar_factura(page, factura, avisos):
+    """Carga la factura en la pantalla ya abierta. No confirma: eso lo hace el
+    operador. Devuelve False si no se pudo ni elegir el prestador.
+    """
+    # ORDEN ORIGINAL: el prestador PRIMERO, luego el tipo, luego el resto de la
+    # cabecera. Es el orden que carga bien en la pantalla real. (Invertirlo
+    # rompia el tipo de comprobante y pisaba el punto de venta.)
+    if not await elegir_prestador(page, factura.cuit, avisos):
+        return False
+
+    tipo_ok = await elegir_tipo_comprobante(page, factura.tipo_comprobante, avisos)
+
+    # Los campos se llenan con fill() SIN blur, como el original: cada blur
+    # dispara un postback de GeneXus, y esos postbacks intermedios barajaban
+    # los valores entre campos (la fecha se colaba en el punto de venta). Sin
+    # blur, GeneXus recibe todo junto recien al agregar la linea (#IMAGE3).
+    await llenar(page, "vCOMPROBANTEPREFIJO", factura.punto_venta)
+    await llenar(page, "vCOMPROBANTECODIGO", factura.nro_factura)
+    await llenar(page, "vCOMPROBANTEFECHARECEPCION", factura.fecha_recepcion)
+    await llenar(page, "vCOMPROBANTEFECHAEMISION", factura.fecha_emision)
+    await llenar(page, "vCOMPROBANTECUOTAVTO", factura.fecha_vencimiento)
+    await llenar(page, "vCOMPROBANTEDEVENGAMIENTO", factura.fecha_devengamiento)
+    await llenar(page, "vCOMPROBANTECAE", factura.cae)
+
+    # La descripcion tiene maxlength=150: lo que no entra se pierde sin aviso.
+    descripcion = " ".join(factura.descripcion.split())
+    limite = await page.locator("#vEXENTOCOMPROBANTEDETALLEDESCRIPCION").get_attribute("maxlength")
+    if limite and len(descripcion) > int(limite):
+        avisos.append(
+            f"La descripción tiene {len(descripcion)} caracteres y en la pantalla "
+            f"entran {limite}.\nSe cargó recortada, revisala antes de confirmar:\n"
+            f"...{descripcion[int(limite):]}"
+        )
+    await llenar(page, "vEXENTOCOMPROBANTEDETALLEDESCRIPCION", descripcion)
+    await llenar(page, "vEXENTOCOMPROBANTEDETALLEPRECIOUNITARIO", factura.importe)
+
+    # Centro de costos: si no hay homonimo, o la provincia del PDF no coincide
+    # con la que SISalud tiene para el prestador, se deja sin tocar y se avisa.
+    centro_costo = factura.centro_costo
+    provincia_sisalud = await provincia_en_sisalud(page)
+    if centro_costo and provincia_sisalud and provincia_sisalud != factura.provincia:
+        avisos.append(
+            f"La provincia del PDF ({factura.provincia}) no coincide con la del "
+            f"prestador en SISalud ({provincia_sisalud}).\n"
+            "El Centro de Costos quedó sin cargar: elegilo antes de confirmar."
+        )
+        centro_costo = None
+    if centro_costo:
+        try:
+            await page.locator("#vEXENTOCENTROCOSTOCODIGO").select_option(
+                value=centro_costo, timeout=8000)
+        except Exception:
+            avisos.append("No se pudo fijar el Centro de Costos: elegilo a mano.")
+
+    # Solo se agrega la linea si el tipo de comprobante quedo cargado. Sin
+    # tipo, "Agregar linea" (#IMAGE3) dispara un dialogo de validacion de
+    # GeneXus que bloquea la pantalla. Se deja todo cargado y el operador
+    # elige el tipo y agrega la linea a mano (ya avisado en el cartel).
+    if tipo_ok:
+        await revisar_cabecera(page, avisos)
+        # await page.locator("#IMAGE2").click()
+        await esperar_genexus(page)
+        await page.locator("#IMAGE3").click()
+        await esperar_genexus(page)
+    else:
+        avisos.append(
+            "No se agregó la línea del detalle porque falta el tipo de "
+            "comprobante.\nElegí el tipo, revisá los datos y agregá la línea "
+            "a mano."
+        )
+    return True
+
+
+async def main(usuario, contraseña, factura):
+    """Modo de un solo comprobante: lo carga y deja la pantalla al operador."""
+    lanzar_chrome()
     avisos = []
+    async with async_playwright() as p:
+        browser = await p.chromium.connect_over_cdp(CDP_URL)
+        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        page = await context.new_page()
+        await abrir_pantalla(page, usuario, contraseña)
+        await cargar_factura(page, factura, avisos)
+        await mostrar_avisos_en_pantalla(page, avisos)
+        return avisos
+
+
+# ---------------------------------------------------------------------------
+# Modo carpeta: se cargan todos los PDF de una carpeta, uno por vez, en una sola
+# pestaña. Despues de cada uno se espera a que el operador Confirme o Cancele en
+# SISalud y recien ahi se carga el siguiente.
+# ---------------------------------------------------------------------------
+
+CARPETA_CARGADOS = "cargados"
+
+# Verificado por CDP (2026-09-09): Cancelar (input name=BUTTON2, evento RETURN de
+# GeneXus) navega fuera de la pantalla. Confirmar (input name=CONFIRMAR, atajo
+# F12) no se pudo probar sin grabar un comprobante real; se asume que al grabar
+# la pantalla navega o vuelve al formulario vacio. En ambos casos el comprobante
+# "desaparece" de la pantalla: eso es lo que se detecta. Mientras el operador
+# corrige un error de validacion, el comprobante sigue en pantalla y se espera.
+# La botonera #TBL_BOTONES (Confirmar/Cancelar) esta oculta con el formulario
+# vacio y aparece cuando hay comprobante cargado.
+ESTADO_PANTALLA = """() => {
+    const v = s => (document.querySelector(s) || {}).value;
+    const botones = document.querySelector('#TBL_BOTONES');
+    return {
+        mascara: !!document.querySelector('div.gx-mask'),
+        comprobante: !!botones && getComputedStyle(botones).display !== 'none'
+            && v('#vENTIDADCODIGO') !== '00000000',
+    };
+}"""
+
+# Cuanto tiene que sostenerse la ausencia del comprobante para darla por firme.
+# Un redibujado de GeneXus puede ocultar la botonera un instante; sin esta
+# espera se pasaba al siguiente comprobante antes de que el operador lo viera.
+REPOSO_AUSENCIA = 1.5
+
+
+class ControlLote:
+    """Estado compartido entre el bucle del lote y los botones de la pantalla."""
+
+    def __init__(self):
+        self.ultimo_boton = None  # 'confirmar' | 'cancelar' (el que toco el operador)
+        self.pedido = None        # 'saltar' | 'detener' (botones del cartel)
+        self.automatico = True    # True mientras carga AutoFiller; False mientras espera al operador
+
+    def registrar(self, accion):
+        if accion in ("confirmar", "cancelar"):
+            self.ultimo_boton = accion
+        elif accion in ("saltar", "detener"):
+            self.pedido = accion
+
+    def nuevo_comprobante(self):
+        self.ultimo_boton = None
+        self.pedido = None
+        self.automatico = True
+
+
+def listar_pdfs(carpeta):
+    return sorted(
+        (f for f in os.listdir(carpeta) if f.lower().endswith(".pdf")
+         and os.path.isfile(os.path.join(carpeta, f))),
+        key=str.lower)
+
+
+def leer_factura(ruta):
+    """Devuelve (factura, motivo). Si no se pudo leer, factura es None."""
+    if not decrypt_pdf(ruta):
+        return None, "no se pudo abrir el PDF"
+    try:
+        factura = extract_information()
+    except Exception as e:
+        return None, f"error al leer el PDF ({e})"
+    if not factura:
+        return None, "no se reconoció como factura electrónica de ARCA"
+    return factura, ""
+
+
+def mover_a_cargados(carpeta, nombre):
+    """Mueve el PDF confirmado a la subcarpeta 'cargados'. Devuelve un aviso o ''."""
+    destino_dir = os.path.join(carpeta, CARPETA_CARGADOS)
+    try:
+        os.makedirs(destino_dir, exist_ok=True)
+        base, ext = os.path.splitext(nombre)
+        destino = os.path.join(destino_dir, nombre)
+        n = 1
+        while os.path.exists(destino):
+            n += 1
+            destino = os.path.join(destino_dir, f"{base} ({n}){ext}")
+        shutil.move(os.path.join(carpeta, nombre), destino)
+        return ""
+    except Exception as e:
+        return f"no se pudo mover a '{CARPETA_CARGADOS}': {e}"
+
+
+async def esperar_resolucion(page, control):
+    """Espera a que el operador termine con el comprobante en pantalla.
+
+    Termina cuando el comprobante ya no esta en la pantalla (Confirmar o
+    Cancelar), o cuando el operador toca "Siguiente" o "Detener" en el cartel.
+    Devuelve 'confirmar', 'cancelar', 'sin_confirmar', 'saltar' o 'detener'.
+
+    "Ya no esta" tiene que sostenerse REPOSO_AUSENCIA segundos sin mascara de
+    GeneXus, porque un redibujado puede esconder la botonera un instante. Que la
+    pestana haya navegado no alcanza por si solo (llegan navegaciones tardias
+    del comprobante anterior): se mira siempre el estado real de la pantalla.
+    Si evaluar falla es porque la pagina esta cambiando de documento, y eso
+    cuenta como ausencia.
+
+    Si la carga automatica fallo, la pantalla arranca vacia: primero se espera a
+    ver el comprobante (el operador lo carga a mano) y despues a que se vaya.
+    """
+    visto = False
+    ausente_desde = None
+    while True:
+        if control.pedido:
+            return control.pedido
+        try:
+            estado = await page.evaluate(ESTADO_PANTALLA)
+        except Exception:
+            estado = None  # cambiando de documento (Cancelar navega)
+        if estado and estado["comprobante"]:
+            visto = True
+            ausente_desde = None
+        elif estado and estado["mascara"]:
+            pass  # GeneXus procesando: no se decide nada
+        elif visto:
+            ausente_desde = ausente_desde or time.monotonic()
+            if time.monotonic() - ausente_desde >= REPOSO_AUSENCIA:
+                break
+        await asyncio.sleep(0.3)
+    return control.ultimo_boton or "sin_confirmar"
+
+
+ESTADOS = {
+    "confirmar": "CONFIRMADO",
+    "cancelar": "CANCELADO",
+    "sin_confirmar": "SIN CONFIRMAR (la pantalla se cerró o recargó)",
+    "saltar": "SALTADO",
+    "detener": "DETENIDO (quedó en pantalla, sin confirmar)",
+}
+
+
+async def procesar_lote(usuario, contraseña, carpeta, informar=lambda texto: None):
+    """Carga todos los PDF de la carpeta. Devuelve [(archivo, estado, detalle)]."""
+    pdfs = listar_pdfs(carpeta)
+    resultados = []
+    if not pdfs:
+        return resultados
+
+    lanzar_chrome()
+    control = ControlLote()
 
     async with async_playwright() as p:
-
-      # Conectarse al navegador en ejecución sin abrir una nueva ventana
-        browser = await p.chromium.connect_over_cdp("http://localhost:9222")
-        
-        # Obtener el contexto de la sesión actual
+        browser = await p.chromium.connect_over_cdp(CDP_URL)
         context = browser.contexts[0] if browser.contexts else await browser.new_context()
         page = await context.new_page()
 
-        # Navegar a la aplicación
-        url = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra?10,0"
-        await page.goto(url)
+        # Sin un listener, Playwright cierra solo los alert() de GeneXus. Durante
+        # la carga automatica se mantiene ese comportamiento (un dialogo abierto
+        # bloquea la pagina y colgaria la carga). Mientras espera al operador, el
+        # listener no hace nada: el dialogo queda en el navegador y lo cierra el.
+        def manejar_dialogo(dialogo):
+            if control.automatico:
+                asyncio.ensure_future(dialogo.dismiss())
+        page.on("dialog", manejar_dialogo)
+        # Los botones del cartel y los de SISalud avisan a Python por aca.
+        await page.expose_binding("autofillerAccion", lambda source, accion: control.registrar(accion))
 
-        # Login solo si aparece la pantalla de ingreso (la sesión puede seguir
-        # abierta de una corrida anterior).
-        caja_usuario = page.get_by_role("textbox", name="ingrese con la forma: usuario")
-        if await caja_usuario.count() > 0:
-            await caja_usuario.fill(usuario)
-            await page.locator("input[name=\"W0030vPASS\"]").fill(contraseña)
-            await page.get_by_role("button", name="entrar").click()
-            await page.wait_for_load_state("networkidle")
-            # Ya autenticado, se va directo a la pantalla de carga con un goto, en
-            # vez de clickear el menú Prestadores → Carga Rapida Comprobantes (esos
-            # clicks a veces no avanzan y el operador tiene que darlos a mano).
-            await page.goto(url)
+        total = len(pdfs)
+        for indice, nombre in enumerate(pdfs, start=1):
+            informar(f"Cargando {indice} de {total}: {nombre}")
+            factura, motivo = leer_factura(os.path.join(carpeta, nombre))
+            if factura is None:
+                resultados.append((nombre, "NO LEÍDO", motivo))
+                continue
 
-        await esperar_genexus(page)
-
-        # ORDEN ORIGINAL: el prestador PRIMERO, luego el tipo, luego el resto de la
-        # cabecera. Es el orden que carga bien en la pantalla real. (Invertirlo
-        # rompia el tipo de comprobante y pisaba el punto de venta.)
-        if not await elegir_prestador(page, factura.cuit, avisos):
-            await mostrar_avisos_en_pantalla(page, avisos)
-            return avisos
-
-        tipo_ok = await elegir_tipo_comprobante(page, factura.tipo_comprobante, avisos)
-
-        # Los campos se llenan con fill() SIN blur, como el original: cada blur
-        # dispara un postback de GeneXus, y esos postbacks intermedios barajaban
-        # los valores entre campos (la fecha se colaba en el punto de venta). Sin
-        # blur, GeneXus recibe todo junto recien al agregar la linea (#IMAGE3).
-        await llenar(page, "vCOMPROBANTEPREFIJO", factura.punto_venta)
-        await llenar(page, "vCOMPROBANTECODIGO", factura.nro_factura)
-        await llenar(page, "vCOMPROBANTEFECHARECEPCION", factura.fecha_recepcion)
-        await llenar(page, "vCOMPROBANTEFECHAEMISION", factura.fecha_emision)
-        await llenar(page, "vCOMPROBANTECUOTAVTO", factura.fecha_vencimiento)
-        await llenar(page, "vCOMPROBANTEDEVENGAMIENTO", factura.fecha_devengamiento)
-        await llenar(page, "vCOMPROBANTECAE", factura.cae)
-
-        # La descripcion tiene maxlength=150: lo que no entra se pierde sin aviso.
-        descripcion = " ".join(factura.descripcion.split())
-        limite = await page.locator("#vEXENTOCOMPROBANTEDETALLEDESCRIPCION").get_attribute("maxlength")
-        if limite and len(descripcion) > int(limite):
-            avisos.append(
-                f"La descripción tiene {len(descripcion)} caracteres y en la pantalla "
-                f"entran {limite}.\nSe cargó recortada, revisala antes de confirmar:\n"
-                f"...{descripcion[int(limite):]}"
-            )
-        await llenar(page, "vEXENTOCOMPROBANTEDETALLEDESCRIPCION", descripcion)
-        await llenar(page, "vEXENTOCOMPROBANTEDETALLEPRECIOUNITARIO", factura.importe)
-
-        # Centro de costos: si no hay homonimo, o la provincia del PDF no coincide
-        # con la que SISalud tiene para el prestador, se deja sin tocar y se avisa.
-        centro_costo = factura.centro_costo
-        provincia_sisalud = await provincia_en_sisalud(page)
-        if centro_costo and provincia_sisalud and provincia_sisalud != factura.provincia:
-            avisos.append(
-                f"La provincia del PDF ({factura.provincia}) no coincide con la del "
-                f"prestador en SISalud ({provincia_sisalud}).\n"
-                "El Centro de Costos quedó sin cargar: elegilo antes de confirmar."
-            )
-            centro_costo = None
-        if centro_costo:
+            control.nuevo_comprobante()
+            avisos = []
+            cargado = False
             try:
-                await page.locator("#vEXENTOCENTROCOSTOCODIGO").select_option(
-                    value=centro_costo, timeout=8000)
+                await abrir_pantalla(page, usuario, contraseña)
+                cargado = await cargar_factura(page, factura, avisos)
+            except Exception as e:
+                avisos.append(
+                    f"Falló la carga automática ({e}).\n"
+                    "Cargalo a mano y confirmá, o tocá 'Siguiente comprobante' para saltarlo."
+                )
+            if not cargado and not avisos:
+                avisos.append("No se pudo cargar el comprobante: cargalo a mano o saltalo.")
+
+            lote = {"indice": indice, "total": total, "archivo": nombre}
+            await mostrar_avisos_en_pantalla(page, avisos, lote)
+            control.automatico = False
+            informar(f"Esperando Confirmar/Cancelar {indice} de {total}: {nombre}")
+
+            resultado = await esperar_resolucion(page, control)
+            control.automatico = True
+            detalle = ""
+            if resultado == "confirmar":
+                detalle = mover_a_cargados(carpeta, nombre) or f"movido a '{CARPETA_CARGADOS}'"
+            resultados.append((nombre, ESTADOS[resultado], detalle))
+
+            if resultado == "detener":
+                for pendiente in pdfs[indice:]:
+                    resultados.append((pendiente, "PENDIENTE", "no se procesó"))
+                break
+
+            # Dejar que termine el postback/navegacion antes de ir al siguiente.
+            try:
+                await esperar_genexus(page, timeout=10000)
             except Exception:
-                avisos.append("No se pudo fijar el Centro de Costos: elegilo a mano.")
+                pass
 
-        # Solo se agrega la linea si el tipo de comprobante quedo cargado. Sin
-        # tipo, "Agregar linea" (#IMAGE3) dispara un dialogo de validacion de
-        # GeneXus que bloquea la pantalla. Se deja todo cargado y el operador
-        # elige el tipo y agrega la linea a mano (ya avisado en el cartel).
-        if tipo_ok:
-            await revisar_cabecera(page, avisos)
-            # await page.locator("#IMAGE2").click()
-            await esperar_genexus(page)
-            await page.locator("#IMAGE3").click()
-            await esperar_genexus(page)
-        else:
-            avisos.append(
-                "No se agregó la línea del detalle porque falta el tipo de "
-                "comprobante.\nElegí el tipo, revisá los datos y agregá la línea "
-                "a mano."
-            )
+        informar("Lote terminado")
+    return resultados
 
-        await mostrar_avisos_en_pantalla(page, avisos)
-        return avisos
 
 def decrypt_pdf(input_path):
     """Decrypts a PDF and saves it to the decrypted_folder."""
@@ -715,13 +988,14 @@ def start_processing(factura):
 # Crear ventana principal
 app = tk.Tk()
 app.title("AutoFiller")
-app.geometry("1100x380")
+app.geometry("1100x420")
 app.configure(bg="#f7f7f9")  # Fondo suave
 app.iconbitmap("insoft.ico")
 
 # Variables de entrada
 user_var = tk.StringVar()
 pass_var = tk.StringVar()
+progreso_var = tk.StringVar()
 
 user_var.set("PLEONETTI@OSAM")
 pass_var.set("Rosario434")
@@ -754,20 +1028,22 @@ tk.Label(user_frame, text="Contraseña", bg=bg_color).grid(row=1, column=0, pady
 tk.Entry(user_frame, textvariable=pass_var, show="*").grid(row=1, column=1, pady=5, padx=5)
 user_frame.pack(pady=10, fill="x", padx=10)
 
-# Selección de archivo
+# Selección de archivo o carpeta
 file_frame = tk.Frame(app, pady=10, **frame_style)
-# tk.Label(file_frame, text="Seleccione el archivo PDF:", bg=bg_color).grid(row=0, column=0, pady=5, padx=5, sticky="w")
 process_button = None
-file_label= None
+file_label = None
+error_label = None
+
+def limpiar_seleccion():
+    global process_button, file_label, error_label
+    for w in (file_label, process_button, error_label):
+        if w:
+            w.pack_forget()
+    file_label = process_button = error_label = None
 
 def select_pdf():
-    global process_button, file_label  # Reference to the global variables
-
-    # Remove previous labels and buttons
-    if file_label:
-        file_label.pack_forget()
-    if process_button:
-        process_button.pack_forget()
+    global process_button, file_label, error_label
+    limpiar_seleccion()
 
     file_path = filedialog.askopenfilename(filetypes=(("Facturas", "*.pdf"),))
     if file_path:
@@ -782,7 +1058,95 @@ def select_pdf():
             error_label = tk.Label(file_frame, text="Error: Factura inválida.", fg="red", bg=bg_color)
             error_label.pack(pady=5, padx=5)
 
-tk.Button(file_frame, text="Seleccionar", command=select_pdf, bg=button_color, fg=button_text_color).pack(pady=5, padx=5)
+def select_folder():
+    global process_button, file_label, error_label
+    limpiar_seleccion()
+
+    carpeta = filedialog.askdirectory(title="Carpeta con los comprobantes en PDF")
+    if not carpeta:
+        return
+    carpeta = os.path.normpath(carpeta)
+    pdfs = listar_pdfs(carpeta)
+    if not pdfs:
+        error_label = tk.Label(file_frame, text="La carpeta no tiene archivos PDF.", fg="red", bg=bg_color)
+        error_label.pack(pady=5, padx=5)
+        return
+    file_label = tk.Label(file_frame, text=f"Carpeta seleccionada: {carpeta}  ({len(pdfs)} PDF)", bg=bg_color)
+    file_label.pack(pady=5, padx=5)
+    process_button = tk.Button(app, text=f"Procesar los {len(pdfs)} comprobantes",
+                               command=lambda: start_lote(carpeta), bg=button_color, fg=button_text_color)
+    process_button.pack(pady=10)
+
+def start_lote(carpeta):
+    """Corre el lote en un hilo aparte para que la ventana siga respondiendo y
+    pueda mostrar el progreso; al terminar muestra el resumen."""
+    for b in (process_button, boton_archivo, boton_carpeta):
+        if b:
+            b.config(state="disabled")
+    progreso_var.set("Iniciando...")
+
+    def informar(texto):
+        app.after(0, lambda: progreso_var.set(texto))
+
+    def correr():
+        error = None
+        resultados = []
+        try:
+            resultados = asyncio.run(procesar_lote(user_var.get(), pass_var.get(), carpeta, informar))
+        except Exception as e:
+            error = e
+        app.after(0, lambda: terminar_lote(carpeta, resultados, error))
+
+    threading.Thread(target=correr, daemon=True).start()
+
+def terminar_lote(carpeta, resultados, error):
+    for b in (boton_archivo, boton_carpeta):
+        b.config(state="normal")
+    if process_button:
+        process_button.pack_forget()
+    progreso_var.set("Lote terminado" if error is None else f"El lote se interrumpió: {error}")
+    mostrar_resumen(carpeta, resultados, error)
+
+def mostrar_resumen(carpeta, resultados, error):
+    ventana = tk.Toplevel(app)
+    ventana.title("Resumen del lote")
+    ventana.geometry("900x500")
+    ventana.attributes("-topmost", True)
+    ventana.lift()
+
+    conteo = {}
+    for _, estado, _ in resultados:
+        clave = estado.split(" (")[0]
+        conteo[clave] = conteo.get(clave, 0) + 1
+    encabezado = f"Carpeta: {carpeta}\nTotal: {len(resultados)}   " + "   ".join(
+        f"{k}: {v}" for k, v in conteo.items())
+    if error is not None:
+        encabezado += f"\n\nEl lote se interrumpió por un error: {error}"
+    tk.Label(ventana, text=encabezado, justify="left", anchor="w", padx=10, pady=8).pack(fill="x")
+
+    marco = tk.Frame(ventana)
+    marco.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    texto = tk.Text(marco, wrap="none", font=("Consolas", 10))
+    barra = tk.Scrollbar(marco, command=texto.yview)
+    texto.config(yscrollcommand=barra.set)
+    barra.pack(side="right", fill="y")
+    texto.pack(side="left", fill="both", expand=True)
+    for nombre, estado, detalle in resultados:
+        linea = f"{estado:<14} {nombre}"
+        if detalle:
+            linea += f"   [{detalle}]"
+        texto.insert("end", linea + "\n")
+    texto.config(state="disabled")
+
+    tk.Button(ventana, text="Cerrar", command=ventana.destroy, bg=button_color, fg=button_text_color).pack(pady=(0, 10))
+
+botones_frame = tk.Frame(file_frame, bg=bg_color)
+boton_archivo = tk.Button(botones_frame, text="Seleccionar archivo", command=select_pdf, bg=button_color, fg=button_text_color)
+boton_archivo.pack(side="left", padx=5)
+boton_carpeta = tk.Button(botones_frame, text="Seleccionar carpeta", command=select_folder, bg=button_color, fg=button_text_color)
+boton_carpeta.pack(side="left", padx=5)
+botones_frame.pack(pady=5)
+tk.Label(file_frame, textvariable=progreso_var, bg=bg_color, fg=title_color).pack(pady=(0, 5))
 file_frame.pack(pady=10, fill="x", padx=10)
 
 # Ejecutar la aplicación
