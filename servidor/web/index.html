@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AutoFiller</title>
+<link rel="icon" type="image/svg+xml" href="/logo.svg">
+<link rel="stylesheet" href="/estilos.css">
+</head>
+<body>
+
+<!-- ====================================================================== -->
+<!-- Entrar — misma estética que el resto de los logins de InSoft            -->
+<!-- ====================================================================== -->
+<div class="pantalla-login" id="vista-login">
+  <div class="columna-login">
+
+    <div class="marca">
+      <img class="isotipo" src="/logo.svg" alt="">
+      <span class="marca-nombre">AutoFiller</span>
+    </div>
+
+    <h1 class="titulo">Entrar</h1>
+
+    <form class="tarjeta tarjeta-login" id="form-sesion">
+      <label>Usuario
+        <input type="text" id="usuario" autocomplete="username"
+               placeholder="USUARIO@OSAM" required>
+      </label>
+      <label>Contraseña
+        <input type="password" id="clave" autocomplete="current-password" required>
+      </label>
+      <button type="submit" class="primario ancho">Entrar</button>
+    </form>
+
+    <p class="nota-login">
+      Es tu usuario de SISalud. Va solo al agente que corre en esta PC:
+      no pasa por el servidor ni se guarda en ningún lado.
+    </p>
+
+    <p class="aviso oculto" id="aviso-sesion"></p>
+
+    <footer class="pie-insoft">
+      Una app de <span class="marca-insoft" aria-hidden="true"></span> InSoft
+    </footer>
+
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<!-- Aplicación                                                             -->
+<!-- ====================================================================== -->
+<div class="oculto" id="vista-app">
+
+  <header class="barra">
+    <div class="marca marca-chica">
+      <img class="isotipo" src="/logo.svg" alt="">
+      <span class="marca-nombre">AutoFiller</span>
+    </div>
+    <div class="barra-derecha">
+      <div class="chips" id="chips"></div>
+      <button type="button" class="secundario" id="desconectar">Salir</button>
+    </div>
+  </header>
+
+  <main>
+
+    <section class="tarjeta">
+      <h2>1. Agregá los comprobantes</h2>
+      <div id="zona" class="zona" tabindex="0" role="button"
+           aria-label="Agregar comprobantes">
+        <p class="zona-texto">Arrastrá los comprobantes acá</p>
+        <p class="sutil" id="zona-formatos">PDF o foto</p>
+        <input type="file" id="archivos" multiple hidden
+               accept=".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp,.bmp,.tif,.tiff">
+      </div>
+      <p class="aviso oculto" id="aviso-lectura"></p>
+    </section>
+
+    <section class="tarjeta oculto" id="seccion-cola">
+      <div class="encabezado-cola">
+        <h2>2. Revisá y cargá</h2>
+        <div class="acciones-cola">
+          <span class="sutil" id="resumen-cola"></span>
+          <button type="button" class="secundario" id="vaciar">Vaciar</button>
+          <button type="button" class="primario" id="cargar">Cargar en SISalud</button>
+        </div>
+      </div>
+      <ol class="cola" id="cola"></ol>
+    </section>
+
+  </main>
+
+  <footer class="pie-insoft pie-app">
+    Una app de <span class="marca-insoft" aria-hidden="true"></span> InSoft
+  </footer>
+
+</div>
+
+<!-- Panel de progreso, fijo abajo mientras corre la cola -->
+<div class="panel oculto" id="panel">
+  <div class="panel-info">
+    <strong id="panel-titulo">&nbsp;</strong>
+    <span class="sutil" id="panel-detalle">&nbsp;</span>
+  </div>
+  <div class="panel-botones">
+    <button type="button" class="secundario" id="saltar">Saltar este</button>
+    <button type="button" class="secundario" id="detener">Detener</button>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

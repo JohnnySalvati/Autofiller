@@ -1,0 +1,369 @@
+/* AutoFiller — paleta de InSoft.
+   Verde institucional para lo accionable, tinta casi negra para el isotipo y
+   los títulos, todo lo demás en grises. Es la misma línea que FactuMov. */
+
+:root {
+  --tinta: #16181c;
+  --texto: #16181c;
+  --tenue: #5f666d;
+
+  --fondo: #ffffff;
+  --fondo-app: #f6f7f9;
+  --papel: #ffffff;
+  --borde: #e3e6ea;
+
+  --verde: #15803d;          /* botones, links */
+  --verde-oscuro: #116631;   /* hover */
+  --verde-vivo: #22c55e;     /* isotipo, toggle de InSoft */
+  --verde-suave: #f0fdf4;
+
+  --rojo: #b91c1c;
+  --rojo-suave: #fef2f2;
+  --ambar: #92400e;
+  --ambar-suave: #fffbeb;
+
+  --radio: 10px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --texto: #e7e9ec;
+    --tenue: #9aa1aa;
+    --fondo: #16181c;
+    --fondo-app: #16181c;
+    --papel: #1f2227;
+    --borde: #343941;
+    --verde: #22c55e;
+    --verde-oscuro: #16a34a;
+    --verde-suave: #10251a;
+    --rojo: #f87171;
+    --rojo-suave: #2a1414;
+    --ambar: #fbbf24;
+    --ambar-suave: #2a2110;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--fondo-app);
+  color: var(--texto);
+  font: 15px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.oculto { display: none !important; }
+.sutil { color: var(--tenue); font-size: 13px; margin: 0; }
+
+/* ---------------------------------------------------------------------- */
+/* Marca                                                                   */
+/* ---------------------------------------------------------------------- */
+
+.marca {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.isotipo { width: 46px; height: 46px; display: block; }
+.marca-nombre {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  color: var(--texto);
+}
+.marca-chica { gap: 9px; }
+.marca-chica .isotipo { width: 28px; height: 28px; }
+.marca-chica .marca-nombre { font-size: 19px; }
+
+/* "Una app de ⬤ InSoft": el toggle verde es la marca de InSoft. */
+.pie-insoft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--tenue);
+  font-size: 14px;
+}
+.marca-insoft {
+  width: 32px;
+  height: 19px;
+  border-radius: 999px;
+  background: var(--verde-vivo);
+  position: relative;
+  flex: none;
+}
+.marca-insoft::after {
+  content: "";
+  position: absolute;
+  top: 2.5px;
+  right: 2.5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Entrar                                                                  */
+/* ---------------------------------------------------------------------- */
+
+.pantalla-login {
+  min-height: 100vh;
+  background: var(--fondo);
+  display: flex;
+  justify-content: center;
+  padding: 56px 16px 40px;
+}
+.columna-login { width: 100%; max-width: 350px; }
+
+.titulo {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin: 38px 0 14px;
+}
+
+.tarjeta-login { display: flex; flex-direction: column; gap: 16px; }
+
+.nota-login {
+  margin: 18px 0 0;
+  color: var(--tenue);
+  font-size: 13px;
+  text-align: center;
+}
+
+.pie-insoft:not(.pie-app) { margin-top: 64px; }
+
+/* ---------------------------------------------------------------------- */
+/* Cáscara de la app                                                       */
+/* ---------------------------------------------------------------------- */
+
+.barra {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 18px 16px;
+}
+.barra-derecha { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+main { max-width: 1000px; margin: 0 auto; padding: 0 16px 120px; }
+
+.pie-app { padding: 0 16px 40px; }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.chip {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--borde);
+  background: var(--papel);
+  color: var(--tenue);
+  white-space: nowrap;
+}
+.chip.ok    { border-color: var(--verde); color: var(--verde); background: var(--verde-suave); }
+.chip.mal   { border-color: var(--rojo);  color: var(--rojo);  background: var(--rojo-suave); }
+.chip.tibio { border-color: var(--ambar); color: var(--ambar); background: var(--ambar-suave); }
+
+/* ---------------------------------------------------------------------- */
+/* Piezas comunes                                                          */
+/* ---------------------------------------------------------------------- */
+
+.tarjeta {
+  background: var(--papel);
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+h2 { font-size: 16px; margin: 0 0 4px; }
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--texto);
+  font-weight: 600;
+}
+
+input, select, textarea {
+  font: 400 15px/1.4 "Segoe UI", system-ui, sans-serif;
+  padding: 9px 11px;
+  border: 1px solid var(--borde);
+  border-radius: 7px;
+  background: var(--papel);
+  color: var(--texto);
+  min-width: 0;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--verde);
+  outline-offset: -1px;
+}
+textarea { resize: vertical; }
+
+button {
+  font: 600 14px/1 "Segoe UI", system-ui, sans-serif;
+  padding: 10px 16px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+button:disabled { opacity: .45; cursor: default; }
+.primario   { background: var(--verde); color: #fff; }
+.primario:hover:not(:disabled) { background: var(--verde-oscuro); }
+.secundario { background: transparent; color: var(--texto); border-color: var(--borde); }
+.secundario:hover:not(:disabled) { border-color: var(--tenue); }
+.ancho { width: 100%; padding: 12px 16px; font-size: 15px; }
+
+a { color: var(--verde); }
+
+.aviso {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  background: var(--ambar-suave);
+  color: var(--ambar);
+  border: 1px solid currentColor;
+  white-space: pre-line;
+}
+.aviso.error { background: var(--rojo-suave); color: var(--rojo); }
+.aviso.bien  { background: var(--verde-suave); color: var(--verde); }
+
+/* ---------------------------------------------------------------------- */
+/* Zona de archivos                                                        */
+/* ---------------------------------------------------------------------- */
+
+.zona {
+  margin-top: 12px;
+  border: 2px dashed var(--borde);
+  border-radius: var(--radio);
+  padding: 30px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.zona:hover, .zona:focus, .zona.encima {
+  border-color: var(--verde);
+  background: var(--verde-suave);
+}
+.zona-texto { margin: 0 0 4px; font-weight: 600; }
+
+/* ---------------------------------------------------------------------- */
+/* Cola                                                                    */
+/* ---------------------------------------------------------------------- */
+
+.encabezado-cola {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.acciones-cola { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.cola { list-style: none; margin: 16px 0 0; padding: 0; }
+
+.item {
+  border: 1px solid var(--borde);
+  border-radius: var(--radio);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.item.activo { border-color: var(--verde); box-shadow: 0 0 0 1px var(--verde); }
+
+.item-cabecera {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+}
+.item-cabecera:hover { background: color-mix(in srgb, var(--texto) 4%, transparent); }
+
+.item-nombre {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 14px;
+}
+.item-resumen { color: var(--tenue); font-size: 12.5px; white-space: nowrap; }
+
+.estado {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.estado.pendiente  { color: var(--tenue); }
+.estado.leyendo    { color: var(--verde); }
+.estado.listo      { color: var(--verde); }
+.estado.revisar    { color: var(--ambar); }
+.estado.problema   { color: var(--rojo); }
+.estado.confirmado { color: var(--verde); background: var(--verde-suave); }
+.estado.descartado { color: var(--tenue); }
+
+.item-cuerpo { padding: 4px 14px 16px; border-top: 1px solid var(--borde); }
+
+.campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.campos .completo { grid-column: 1 / -1; }
+
+.contador { font-size: 12px; color: var(--tenue); font-weight: 400; }
+.contador.pasado { color: var(--rojo); font-weight: 600; }
+
+.avisos { margin: 14px 0 0; padding-left: 20px; font-size: 13px; color: var(--ambar); }
+.avisos li { margin-bottom: 4px; white-space: pre-line; }
+
+/* ---------------------------------------------------------------------- */
+/* Panel de progreso                                                       */
+/* ---------------------------------------------------------------------- */
+
+.panel {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  background: var(--papel);
+  border-top: 1px solid var(--borde);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, .12);
+}
+.panel-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.panel-botones { display: flex; gap: 8px; }
+
+@media (max-width: 620px) {
+  .acciones-cola { width: 100%; }
+  .acciones-cola button { flex: 1; }
+  .barra { justify-content: center; }
+}

@@ -1,24 +1,110 @@
 # AutoFiller — contexto del proyecto
 
-App de escritorio (Python 3.11, Tkinter + Playwright, compilada con PyInstaller a `dist/AutoFiller.exe`) que extrae datos de una factura electrónica de ARCA en PDF y los carga en la pantalla **Prestadores → Carga Rápida Comprobantes** del sistema web SISalud (GeneXus, `http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra`). Cliente: obra social AOMAOSAM. Desarrollado por InSoft (Johnny Salvati). Comunicación en español rioplatense.
+Extrae los datos de un comprobante de ARCA (PDF o foto) y los carga en la pantalla **Prestadores → Carga Rápida Comprobantes** del sistema web SISalud (GeneXus, `http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra`). Cliente: obra social AOMAOSAM. Desarrollado por InSoft (Johnny Salvati). Comunicación en español rioplatense.
 
-## Cómo funciona hoy (`AutoFiller.py`, único archivo, ~1130 líneas)
+Desde 2026-09-09 es una **app web híbrida** (Python 3.11, FastAPI + Playwright): un servidor que lee los comprobantes y un agente local que los carga en el SISalud del operador. La versión de escritorio (Tkinter, `dist/AutoFiller.exe`) sigue existiendo y es la que usan hoy los operadores.
 
-1. `decrypt_pdf()` abre el PDF con `pikepdf` y lo guarda como `decrypted.pdf` en el cwd.
-2. `extract_information()` saca el texto con `pdfplumber` y con regex obtiene:
-   - `tipo_comprobante`: `COD. 011` → `TIPOS_COMPROBANTE` devuelve el **`value`** de la opción del combo `#vTIPOCOMPROBANTECODIGO` (`"6"`/`"11"` → `FACCC`, `"15"` → `NCCC`).
-   - `cuit` (11 dígitos tras `CUIT:`), `punto_venta` y `nro_factura` (tras `Punto de Venta:` / `Comp. Nro:`, sin ceros a la izquierda), `fecha_emision`, `fecha_hasta` (tras `Hasta:`, usada como vencimiento y devengamiento), `cae`, `descripcion` (texto entre los dos `Subtotal`), `importe` (`Importe Total:`).
-   - `provincia` y `centro_costo` a partir del `Domicilio Comercial:` (ver más abajo).
-   - `fecha_recepcion` = hoy.
-3. `lanzar_chrome()` lanza Chrome con `--remote-debugging-port=9222 --user-data-dir=C:\ChromeProfile` (si ya está abierto reutiliza la instancia); `abrir_pantalla()` navega a la Carga Rápida (`URL_CARGA`) y loguea solo si aparece la caja de usuario; `cargar_factura()` carga el comprobante en la pantalla ya abierta. `main()` encadena las tres para el modo de un solo PDF. Orden de carga (ver sección de comportamiento): **prestador primero** (`elegir_prestador`, prompt `#PROMPTIMGENTIDAD` por CUIT, elige la fila del CUIT), luego **tipo** (`elegir_tipo_comprobante`, por value), luego el resto de la cabecera y el detalle con `llenar()` (`fill` sin blur): `#vCOMPROBANTEPREFIJO`, `#vCOMPROBANTECODIGO`, las fechas, `#vCOMPROBANTECAE`, `#vEXENTOCOMPROBANTEDETALLEDESCRIPCION`, `#vEXENTOCOMPROBANTEDETALLEPRECIOUNITARIO`, `#vEXENTOCENTROCOSTOCODIGO`. Solo clickea `#IMAGE3` (agregar línea) si el tipo quedó cargado. Devuelve una lista de avisos.
-4. GUI Tkinter: usuario, contraseña, "Seleccionar archivo" o "Seleccionar carpeta", "Procesar". En modo archivo, tras procesar hace `sys.exit(0)`.
-   **Modo carpeta (implementado 2026-09-09)**: `procesar_lote()` toma todos los PDF de la carpeta (orden alfabético), en **una sola pestaña** reutilizada con `goto` entre comprobantes. Por cada uno: `leer_factura()` (si el PDF no se lee, queda "NO LEÍDO" y sigue), `abrir_pantalla()`, `cargar_factura()`, cartel con progreso, y `esperar_resolucion()` hasta que el operador Confirme o Cancele en SISalud; recién ahí carga el siguiente. Corre en un hilo aparte (`start_lote`) para que la ventana muestre el progreso, y al final `mostrar_resumen()` abre una ventana con el estado de cada archivo (CONFIRMADO / CANCELADO / SALTADO / NO LEÍDO / SIN CONFIRMAR / DETENIDO / PENDIENTE). Los confirmados se mueven a la subcarpeta `cargados/`; el resto queda donde estaba.
-   - **Detección de Confirmar/Cancelar**: el cartel engancha con listeners (fase captura) el `input[name=CONFIRMAR]` (y la tecla F12, que es su atajo) y el `input[name=BUTTON2]` (Cancelar), que avisan a Python por `page.expose_binding("autofillerAccion")`. Eso dice **qué** botón tocó; el **cuándo** se decide con `ESTADO_PANTALLA`: el comprobante "se fue" si la botonera `#TBL_BOTONES` quedó oculta o `#vENTIDADCODIGO` volvió a `00000000` (o si `evaluate` falla porque la página cambia de documento), y esa ausencia tiene que **sostenerse `REPOSO_AUSENCIA` = 1,5 s sin `div.gx-mask`**: un redibujado de GeneXus esconde la botonera un instante y sin ese reposo se pasaba al siguiente antes de que el operador viera el comprobante (pasó en la prueba). Los eventos `framenavigated` **no** se usan: llegan navegaciones tardías del comprobante anterior. Mientras el operador corrige un error de validación el comprobante sigue en pantalla y se espera. Si la carga automática falló, la pantalla arranca vacía: primero se espera a **ver** el comprobante (lo carga el operador) y después a que se vaya.
-   - Botones del cartel en modo carpeta: "Siguiente comprobante (saltar este)" → SALTADO sin mover el archivo (aunque se haya tocado Confirmar: regla fija para no mover por error), y "Detener lote".
-   - Diálogos (`alert()` de GeneXus): sin listener, Playwright los cierra solos. El listener `manejar_dialogo` los sigue cerrando **mientras carga AutoFiller** (`control.automatico`, un diálogo abierto bloquea la página y colgaría la carga) y **no hace nada mientras espera al operador**, para que el diálogo quede en el navegador y lo cierre él (mientras está abierto, `page.evaluate` espera).
-5. **Avisos al operador**: `mostrar_avisos_en_pantalla()` inyecta un cartel rojo fijo (`#autofiller-avisos`, z-index máximo) arriba de la propia pantalla de SISalud, donde el operador lo ve antes de confirmar. El `messagebox` de Tkinter quedó solo como respaldo forzado al frente (`-topmost`) porque por defecto aparecía **detrás** del navegador y el operador no lo veía hasta después de confirmar y cerrar.
+## Arquitectura (app web, implementada 2026-09-09)
 
-Hay 63 PDFs reales en `samples/` (ver "Muestras" abajo). `decrypted.pdf` en la raíz es el que deja la última corrida.
+Decisión del usuario: **híbrida**. SISalud es accesible desde internet (el `vpn.` de
+la URL es un nombre engañoso, no hay VPN de por medio — conviene corregirlo algún
+día), así que la carga headless desde el servidor era técnicamente viable, pero se
+descartó a propósito: perdería que el operador vea la pantalla real antes de
+confirmar, que es el control de calidad de todo el proceso. Solo se centraliza la
+**lectura** del comprobante.
+
+```
+   Navegador del operador
+   ┌─────────────────────────────┐
+   │  Web de AutoFiller          │──── PDF / foto ────►  servidor/
+   │  (revisar y corregir)       │◄─── campos JSON ────
+   └──────────┬──────────────────┘
+              │ factura + credenciales de SISalud
+              ▼  (127.0.0.1, nunca salen de la PC)
+        agente/  ──► Chrome del operador ──► SISalud
+```
+
+### `servidor/` — extracción (FastAPI, sin estado)
+
+- `main.py`: `POST /api/extraer` (multipart, varios archivos, devuelve un `Resultado`
+  por archivo en el mismo orden), `GET /api/opciones` (combos + si hay lectura de
+  fotos), y sirve `web/`. No guarda nada: cada archivo se procesa en memoria y se
+  descarta. Ya no deja `decrypted.pdf` en el cwd.
+- `extraccion/__init__.py`: `extraer(nombre, contenido)` elige el camino según el
+  archivo — PDF con texto → regex; PDF escaneado → se rasteriza la página 1 y va por
+  el camino de foto; foto → QR + visión. **Nunca lanza**: todo error vuelve en
+  `Resultado.error`.
+- `extraccion/texto.py`: los regex de ARCA. Mismo resultado que el escritorio,
+  verificado campo por campo sobre las 63 muestras (63/63 idénticos), pero ningún
+  campo faltante corta la extracción: cada uno que no aparece vuelve vacío con su
+  aviso, en vez del `UnboundLocalError` del escritorio.
+- `extraccion/qr.py`: QR de ARCA (`zxing-cpp`, sin DLL externa como necesitaría
+  `pyzbar`). El payload trae CUIT, tipo, punto de venta, número, fecha, importe y CAE
+  firmados por ARCA: **pisa** lo que devuelva el modelo de visión.
+- `extraccion/vision.py`: Claude con visión, salida estructurada por `json_schema`.
+  Aporta lo que el QR no trae: período (`Hasta:`), descripción del detalle y
+  domicilio comercial. Modelo por defecto `claude-opus-5`, esfuerzo `medium`,
+  ambos configurables por entorno. Sin `ANTHROPIC_API_KEY` la app anda igual con
+  PDFs y la web lo avisa con un chip.
+- `extraccion/centro_costo.py`: la lógica del requerimiento 1, portada tal cual. El
+  único cambio es la firma: toma el domicilio ya extraído en vez del texto entero,
+  porque en el camino de foto el domicilio lo trae la visión, no un regex.
+- `web/`: `index.html` + `estilos.css` + `app.js` + `logo.svg`, sin framework ni build.
+  Dos vistas que se alternan por JS: **Entrar** y la aplicación. Si el agente ya tiene
+  la sesión abierta (se recargó la página), se entra directo sin pedir la clave otra vez.
+
+**Identidad visual**: la misma línea que el resto de las apps de InSoft (referencia:
+el login de FactuMov). Isotipo en cuadrado redondeado tinta `#16181c` con el glifo en
+verde vivo `#22c55e`; wordmark en negrita al lado; título "Entrar"; tarjeta blanca
+bordeada; botón verde `#15803d` a todo el ancho; pie "Una app de ⬤ InSoft" con el
+toggle verde de InSoft (hecho en CSS, `.marca-insoft`). El isotipo propio de AutoFiller
+es una **"A" cuyo travesaño se estira más allá de la pata derecha**: el campo que se
+completa solo. Está en `web/logo.svg` y se usa también de favicon.
+
+### `agente/` — carga en SISalud (FastAPI en `127.0.0.1:8765`)
+
+Es lo único que toca SISalud, y corre en la PC del operador.
+
+- `sisalud.py`: **portado tal cual del escritorio**, con los tres hallazgos de la
+  sección siguiente intactos (máscara, orden de carga, `fill` sin blur).
+- `operador.py`: el cartel inyectado en la pantalla, `ControlLote` (acá `Control`) y
+  `esperar_resolucion`. Sin cambios de lógica; el botón dice "Detener la cola".
+- `navegador.py`: lanza/reutiliza Chrome con `--remote-debugging-port` y mantiene
+  **una sola** pestaña para toda la cola. Busca `chrome.exe` en varias rutas y acepta
+  `AUTOFILLER_CHROME` (antes estaba hardcodeada y fallaba en otras PCs).
+- `main.py`: `POST /api/sesion` (credenciales, quedan en memoria), `POST /api/trabajo`
+  (arranca uno y vuelve enseguida), `GET /api/trabajo` (fase: `cargando` → `esperando`
+  → `terminado`), `POST /api/accion` (`saltar`/`detener`), `POST /api/listo`.
+
+**CORS y Private Network Access**: el agente escucha en `127.0.0.1`, así que cualquier
+página abierta en el navegador podría hablarle. Por eso `AUTOFILLER_ORIGENES` es una
+lista blanca explícita y nunca un comodín. Y Chrome exige el permiso extra de PNA para
+que una página servida desde otro origen llame a `127.0.0.1`: se resuelve con
+`allow_private_network=True` de `CORSMiddleware` (Starlette ≥ 1.x lo trae; sin eso el
+preflight devuelve 400 "Disallowed CORS private-network" y el navegador no explica por
+qué).
+
+**Playwright no necesita `playwright install`**: se engancha por CDP al Chrome del
+operador, así que usa el driver del paquete pip y ninguno de los navegadores que
+descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.exe`.
+
+### Lo que la web agrega sobre el escritorio
+
+- Los datos se **revisan y corrigen antes** de tocar SISalud. La descripción muestra
+  un contador contra el `maxlength=150` de la pantalla, así que el recorte se ve
+  antes de cargar y no después.
+- Soporta fotos (requerimiento 2).
+- Las credenciales salieron del código: se piden en la web y van solo al agente.
+- Los errores son visibles: el escritorio compilaba `--noconsole` y el operador solo
+  veía "Factura inválida".
+- No hay "mover a `cargados/`": en la web no hay una carpeta que mover. El equivalente
+  es el estado por comprobante en la cola y el resumen al terminar.
+
+### `AutoFiller.py` (escritorio) — se mantiene
+
+Sigue funcionando y es lo que usan hoy los operadores. Queda hasta que la web esté
+desplegada. Es el único lugar donde quedan las credenciales hardcodeadas.
+
 
 ## Comportamiento de la pantalla frente a la automatización (verificado por CDP, 2026-09-09)
 
@@ -48,18 +134,40 @@ Los `id` de los combos y sus `value` — usar siempre `select_option(value=...)`
 
 Centros de costo confirmados por el usuario para cuatro de ellas: SANFELIU→Olavarría, ANTOLA→Mina Aguilar, ALCIBAR→Tandil, HIDALGO→Barker. Fueron elegidas a propósito como casos especiales, no son una muestra representativa.
 
-## Problemas detectados en la evaluación (2026-09)
+## Problemas de la evaluación 2026-09 — estado
 
-- **Credenciales hardcodeadas** en `user_var.set(...)` / `pass_var.set(...)`. Están en el `.exe` distribuido y en git. Hay que sacarlas. **Pendiente.**
-- **Selectores frágiles**: el iframe del prompt depende del título literal con `?34`. **Pendiente.** (El tipo de comprobante ya no se elige por posición: se resolvió con `TIPOS_COMPROBANTE`.)
-- **Errores invisibles**: los `except` hacen `print`, pero el `.exe` se compila `--noconsole`; el usuario solo ve "Factura inválida". Si falta `Hasta:` o `Importe Total:` en el PDF revienta con `UnboundLocalError`. **Pendiente** (los avisos del centro de costos sí se ven, van por `messagebox`).
-- **Dependencias del entorno**: Chrome en `C:\Program Files\Google\Chrome\Application\chrome.exe`, perfil `C:\ChromeProfile`, `insoft.ico` en el cwd (`app.iconbitmap` falla desde otra carpeta), browsers de Playwright no empaquetados (ver comentario línea 1). **Pendiente.**
-- **Higiene del repo**: `requirements.txt` está en UTF-16 y lista Django/DRF/JWT (pegado de otro proyecto); faltan las deps reales (`playwright`, `pdfplumber`, `pikepdf`). `chromedriver.exe` (18 MB) no se usa. `tempCodeRunnerFile.py` es una copia vieja de `main()`. `venv/` está commiteado. **Pendiente.**
+Resueltos por la app web (siguen presentes en `AutoFiller.py`, que se mantiene):
+
+- **Credenciales hardcodeadas**: la web las pide y las manda solo al agente local.
+- **Errores invisibles**: todo vuelve en `Resultado.error` / `avisos` y se ve en la
+  cola. Un PDF sin `Hasta:` o sin `Importe Total:` ya no revienta.
+- **Dependencias del entorno**: la ruta de Chrome se busca en varias ubicaciones y se
+  puede fijar por entorno; no hay `insoft.ico` ni cwd que importe; Playwright no
+  necesita browsers descargados.
+- **`requirements.txt`**: separado por componente y en UTF-8.
+
+Pendientes:
+
+- **Selectores frágiles**: el iframe del prompt sigue dependiendo del título literal
+  con `?34` (`SELECTOR_PROMPT` en `agente/sisalud.py`).
+- **Higiene del repo**: `chromedriver.exe` (18 MB, no se usa), `tempCodeRunnerFile.py`
+  (copia vieja de `main()`) y `venv/` commiteado siguen ahí. No se borraron porque
+  nadie lo pidió.
+- **Duplicación deliberada**: `Factura` está definida en
+  `servidor/extraccion/modelo.py` y espejada en `agente/main.py`, porque servidor y
+  agente se instalan por separado y no comparten código. Si se agrega un campo en uno,
+  hay que agregarlo en el otro.
+- **Confirmar en un lote real** sigue sin probarse (graba comprobantes de verdad).
 
 ## Restricciones confirmadas
 
-- **SISalud no ofrece ningún camino alternativo a la pantalla** (sin API GeneXus, sin inserción directa en SQL). La carga tiene que seguir siendo por automatización del navegador.
-- Lo usan **2 usuarios**. Otros **2 no lo usan porque la mayoría de los comprobantes que reciben son fotos, no PDF**.
+- **SISalud no ofrece ningún camino alternativo a la pantalla** (sin API GeneXus, sin
+  inserción directa en SQL). La carga tiene que seguir siendo automatización del
+  navegador.
+- SISalud **sí es accesible desde internet**; el `vpn.` del host es un nombre
+  heredado y confuso, conviene corregirlo.
+- Lo usan **2 usuarios**. Otros **2 no lo usan porque la mayoría de los comprobantes
+  que reciben son fotos, no PDF** — que es lo que destraba el requerimiento 2.
 
 ## Requerimientos
 
@@ -86,21 +194,63 @@ Los 4 dudosos cargan la provincia y el operador corrige si hace falta: ANTOLA y 
 
 Sin resolver: el caso de fondo es que el prestador esté lejos de la seccional del afiliado. Ejemplo real confirmado: ANTOLA, prestadora en Perico (Jujuy) y centro de costos Mina Aguilar, a ~250 km. La única forma de resolverlo sería leer la seccional del afiliado en el padrón de SISalud a partir del DNI o número de afiliado que aparece en la descripción del detalle.
 
-### 2. Soportar comprobantes en foto (JPG/PNG/HEIC)
-Enfoque recomendado: **híbrido QR + OCR**.
-- Toda factura electrónica de ARCA trae un **QR** (`https://www.afip.gob.ar/fe/qr/?p=<base64 JSON>`) con `cuit`, `tipoCmp`, `ptoVta`, `nroCmp`, `fecha`, `importe`, `codAut` (CAE). Leerlo (p. ej. `pyzbar`/`zxing-cpp` + OpenCV) da esos campos exactos, gratis, y sirve también para PDF.
-- Lo que el QR no trae y requiere OCR: período facturado (`Hasta:`), descripción del detalle y domicilio comercial (localidad y provincia).
-- Opciones de OCR y costo por 100 comprobantes (precios de lista sep-2026): Tesseract local USD 0 (precisión baja en fotos de celular); Google Cloud Vision / AWS Textract Detect Text ≈ USD 0,15 (Vision: 1.000 págs/mes gratis); Textract Analyze Expense / Azure prebuilt invoice ≈ USD 1,00; API de Claude con visión (Haiku 4.5 ≈ USD 0,35–0,40, Sonnet 5 ≈ USD 0,75) devolviendo JSON estructurado directamente — la más robusta con fotos malas y layouts variables.
-- **Decisión tomada (2026-09-09): los comprobantes pueden salir de la red de AOMAOSAM** hacia un proveedor externo. Queda habilitado usar un modelo con visión (API de Claude) o un OCR en la nube; no hace falta limitarse a Tesseract local.
+### 2. Comprobantes en foto (JPG/PNG/HEIC) — IMPLEMENTADO (2026-09-09)
 
-### 3. Evaluación app web
-Con SISalud sin API, una app web tendría que correr Playwright headless en el servidor por la VPN, manteniendo toda la fragilidad del scraping y perdiendo que el usuario vea la pantalla antes de confirmar. Arquitectura que sí tiene sentido si se adopta OCR externo: **extracción en un servidor** (recibe PDF/foto, lee QR, llama al OCR, devuelve JSON; la clave de API no se distribuye en el `.exe`) y **carga en SISalud desde la PC del usuario** (cliente liviano). Si se queda en OCR local, conviene primero robustecer el escritorio (credenciales, errores visibles, varios comprobantes por sesión, selectores estables) y recién después evaluar la web.
+Enfoque **híbrido QR + visión**, en `servidor/extraccion/`:
+
+- El **QR** de ARCA (`https://www.afip.gob.ar/fe/qr/?p=<base64 JSON>`) trae `cuit`,
+  `tipoCmp`, `ptoVta`, `nroCmp`, `fecha`, `importe` y `codAut` (CAE) exactos y gratis.
+  Se lee con `zxing-cpp` (elegido sobre `pyzbar`, que en Windows necesita una DLL
+  aparte). Lo que el QR dice **pisa** lo que devuelva el modelo.
+- Lo que el QR no trae — período (`Hasta:`), descripción del detalle y domicilio
+  comercial — lo saca **Claude con visión**, con salida estructurada por `json_schema`.
+- **Decisión del cliente (2026-09-09)**: los comprobantes pueden salir de la red de
+  AOMAOSAM hacia un proveedor externo, así que no hay que limitarse a OCR local.
+- Modelo por defecto `claude-opus-5`. Si el costo por comprobante pesa, se baja con
+  `AUTOFILLER_MODELO_VISION` (`claude-sonnet-5`, `claude-haiku-4-5`) o con
+  `AUTOFILLER_ESFUERZO_VISION`, sin tocar código. Referencia de precios de lista
+  sep-2026 por 100 comprobantes: Haiku 4.5 ≈ USD 0,35–0,40; Sonnet 5 ≈ USD 0,75.
+- Un PDF **escaneado** (sin capa de texto) entra por este mismo camino: se rasteriza
+  la primera página con `pypdfium2` y se trata como foto.
+
+Sin probar todavía contra fotos reales de celular: no hay muestras. Las 63 de
+`samples/` son todas PDF nativos.
+
+### 3. App web — IMPLEMENTADO (2026-09-09)
+
+Ver "Arquitectura" arriba. Se descartó la web pura (todo headless en el servidor)
+aunque SISalud sea alcanzable desde internet: perdería el control visual del
+operador antes de confirmar.
 
 ## Cómo probar
 
-- **Contra los PDFs**: cargar el módulo sin la GUI (`src.split("# Crear ventana principal")[0]` + `exec`) y llamar a `extract_information()` o `centro_costo_desde_domicilio(text)`. La GUI arranca sola al importar el archivo.
-- **Modo carpeta de punta a punta**: cargar el módulo sin la GUI y llamar a `procesar_lote(usuario, clave, carpeta, print)` como tarea, con otra conexión CDP que simula al operador (click en `input[name=BUTTON2]` para cancelar, `window.autofillerAccion('saltar'|'detener')` para los botones del cartel). No confirmar nunca: graba de verdad.
-- **Contra la pantalla real**: si Chrome está levantado con `--remote-debugging-port=9222`, `playwright.chromium.connect_over_cdp("http://127.0.0.1:9222")` engancha la sesión abierta del usuario. Sirve para leer el DOM sin tocar nada; para probar un combo, guardar el valor original y restaurarlo después.
+- **La extracción, contra las muestras**: `extraer(nombre, contenido)` de
+  `servidor/extraccion` no depende de nada levantado ni de ninguna GUI.
+
+  ```python
+  import sys; sys.path.insert(0, 'servidor')
+  from extraccion import extraer
+  print(extraer('x.pdf', open('samples/x.pdf', 'rb').read()).factura)
+  ```
+
+- **Contra el escritorio (regresión)**: cargar `AutoFiller.py` sin la GUI
+  (`src.split("# Crear ventana principal")[0]` + `exec`; la GUI arranca sola al
+  importarlo) y comparar `extract_information()` con `extraer()` campo por campo
+  sobre las 63 muestras. Al portar dio 63/63 idénticos: si una vuelve a diferir,
+  es una regresión.
+- **El servidor**: `servidor\iniciar.bat` y `POST /api/extraer` con `curl -F`. Ojo con
+  los nombres de archivo con espacios: `curl` los parte y el pedido nunca sale.
+- **El agente, sin tocar SISalud**: `agente\iniciar.bat` y pegarle a `/api/salud`,
+  `/api/sesion` y `/api/accion`. **No** llamar a `/api/trabajo`: eso abre Chrome y
+  carga de verdad en la pantalla.
+- **De punta a punta**: cargar la cola desde la web y resolver cada comprobante con
+  Cancelar (`input[name=BUTTON2]`) o con los botones del cartel
+  (`window.autofillerAccion('saltar'|'detener')`). **No confirmar nunca: graba de
+  verdad.**
+- **Contra la pantalla real**: si Chrome está levantado con
+  `--remote-debugging-port=9222`, `playwright.chromium.connect_over_cdp("http://127.0.0.1:9222")`
+  engancha la sesión abierta del usuario. Sirve para leer el DOM sin tocar nada; para
+  probar un combo, guardar el valor original y restaurarlo después.
 
 ## Directivas de trabajo del usuario
 

@@ -1,0 +1,10 @@
+# Este archivo estaba en UTF-16 y listaba Django/DRF/JWT, pegado de otro proyecto.
+# Las dependencias reales estan separadas por componente:
+#
+#   servidor/requirements.txt   servidor de extraccion (FastAPI, PDF, QR, vision)
+#   agente/requirements.txt     agente local que carga en SISalud (FastAPI, Playwright)
+#
+# La version de escritorio (AutoFiller.py) necesita:
+playwright
+pdfplumber
+pikepdf

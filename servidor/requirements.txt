@@ -1,0 +1,15 @@
+# Servidor de extraccion de AutoFiller (FastAPI).
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9   # subida de archivos por multipart/form-data
+
+# Lectura de PDF
+pdfplumber>=0.11
+pikepdf>=9.0              # saca la encriptacion de solo-lectura de ARCA
+pypdfium2>=4.30           # rasteriza los PDF que vienen escaneados
+
+# Lectura de fotos
+pillow>=10.3
+pillow-heif>=0.18         # HEIC/HEIF, el formato con que fotografia un iPhone
+zxing-cpp>=2.2            # QR de ARCA (no necesita DLL externa como pyzbar)
+anthropic>=0.40           # modelo de vision; requiere ANTHROPIC_API_KEY
