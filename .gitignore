@@ -2,3 +2,6 @@ venv
 *.xlsx
 build
 dist
+__pycache__/
+# Facturas de prueba: contienen nombre y DNI de afiliados reales, no van al repo.
+samples/
