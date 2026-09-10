@@ -8,3 +8,9 @@ __pycache__/
 decrypted.pdf
 # Facturas de prueba: contienen nombre y DNI de afiliados reales, no van al repo.
 samples/
+# Claves de API (ANTHROPIC_API_KEY): nunca al repo.
+.env
+*/.env
+# Prueba de OCR: texto de comprobantes con datos reales de afiliados.
+pruebas/cache_ocr/
+pruebas/resultado_ocr.md

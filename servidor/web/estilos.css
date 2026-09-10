@@ -88,6 +88,15 @@ body {
   color: var(--tenue);
   font-size: 14px;
 }
+.link-insoft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.link-insoft:hover { color: var(--texto); }
+
 .marca-insoft {
   width: 32px;
   height: 19px;
@@ -116,7 +125,7 @@ body {
   background: var(--fondo);
   display: flex;
   justify-content: center;
-  padding: 56px 16px 40px;
+  padding: 32px 16px 40px;
 }
 .columna-login { width: 100%; max-width: 350px; }
 
@@ -124,7 +133,7 @@ body {
   font-size: 30px;
   font-weight: 700;
   letter-spacing: -.02em;
-  margin: 38px 0 14px;
+  margin: 22px 0 12px;
 }
 
 .tarjeta-login { display: flex; flex-direction: column; gap: 16px; }
@@ -136,7 +145,7 @@ body {
   text-align: center;
 }
 
-.pie-insoft:not(.pie-app) { margin-top: 64px; }
+.pie-insoft:not(.pie-app) { margin-top: 48px; }
 
 /* ---------------------------------------------------------------------- */
 /* Cáscara de la app                                                       */

@@ -1,11 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="AutoFiller">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-label="AutoFiller">
   <title>AutoFiller</title>
-  <!-- Mismo isotipo que el resto de las apps de InSoft: cuadrado redondeado
-       oscuro con el glifo en verde. El de AutoFiller es una "A" cuyo travesaño
-       se estira más allá de la pata derecha: es el campo que se completa solo. -->
-  <rect width="48" height="48" rx="12" fill="#16181c"/>
-  <g fill="none" stroke="#22c55e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M16 35 L24 14 L32 35"/>
-    <path d="M19.5 28 H33"/>
-  </g>
+  <!--
+    Ícono de producto de AutoFiller, en la misma familia que el de FactuMov: fondo redondeado
+    con el radio de un ícono de app, un solo trazo grueso de punta redonda que dibuja la
+    inicial, y un punto blanco donde ese trazo termina. El punto es la cita al círculo del
+    interruptor de InSoft —la pastilla verde encendida—, que es la idea de toda la marca.
+
+    La A va en dos subpaths de un mismo `path`: las dos patas, y el travesaño, que arranca
+    sobre la pata izquierda (su punta redonda queda escondida adentro del trazo) y sigue de
+    largo hasta pasar apenas la pata derecha, donde termina en el punto. Ese travesaño que
+    se pasa es lo propio de AutoFiller: el campo que se completa solo.
+
+    El travesaño va justo lo necesario para que el punto quede tocando la pata derecha y
+    nada más: así la parte verde del interruptor queda adentro de la letra y lo único que
+    asoma es el círculo blanco. `cx 84` es la tangencia — a esa altura la pata tiene el eje
+    en `x 70,6` y 7,1 de medio trazo horizontal, y el punto mide 6.
+  -->
+  <defs>
+    <!-- El mismo gradiente vertical de la pastilla de InSoft. `userSpaceOnUse` sobre la altura
+         real de la letra (26 a 94, o sea el trazo con sus puntas) y no sobre el bounding box,
+         que en un path con stroke no incluye el ancho del trazo. -->
+    <linearGradient id="af-stroke" gradientUnits="userSpaceOnUse" x1="0" y1="26" x2="0" y2="94">
+      <stop offset="0" stop-color="#2EBD59"/>
+      <stop offset="1" stop-color="#1B9E4B"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" rx="23" fill="#0F172A"/>
+  <path d="M31 87 L54 33 L77 87 M39 72 H84" fill="none" stroke="url(#af-stroke)"
+        stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="84" cy="72" r="6" fill="#FFFFFF"/>
 </svg>

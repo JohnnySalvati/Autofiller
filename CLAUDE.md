@@ -34,10 +34,18 @@ confirmar, que es el control de calidad de todo el proceso. Solo se centraliza l
   archivo — PDF con texto → regex; PDF escaneado → se rasteriza la página 1 y va por
   el camino de foto; foto → QR + visión. **Nunca lanza**: todo error vuelve en
   `Resultado.error`.
-- `extraccion/texto.py`: los regex de ARCA. Mismo resultado que el escritorio,
-  verificado campo por campo sobre las 63 muestras (63/63 idénticos), pero ningún
-  campo faltante corta la extracción: cada uno que no aparece vuelve vacío con su
-  aviso, en vez del `UnboundLocalError` del escritorio.
+- `extraccion/texto.py`: los regex de ARCA. Mismo resultado que el escritorio en
+  todos los campos **menos la descripción** (ver abajo), y ningún campo faltante
+  corta la extracción: cada uno que no aparece vuelve vacío con su aviso, en vez
+  del `UnboundLocalError` del escritorio.
+  `extraer_descripcion()` (2026-09-10) reemplaza al "todo lo que hay entre los dos
+  `Subtotal`" del escritorio, que era posicional y solo funcionaba con el orden de
+  lectura de pdfplumber. Ahora reconoce **dos layouts** desde el mismo ancla
+  (`Producto / Servicio`): el de filas (pdfplumber, con las columnas numéricas
+  pegadas al final de la primera línea de la descripción) y el de bloques (un OCR
+  como Cloud Vision, que agrupa primero todo el texto y después los números). En
+  el de filas saca además las seis columnas del renglón, que antes se cargaban en
+  SISalud metidas en el medio del texto.
 - `extraccion/qr.py`: QR de ARCA (`zxing-cpp`, sin DLL externa como necesitaría
   `pyzbar`). El payload trae CUIT, tipo, punto de venta, número, fecha, importe y CAE
   firmados por ARCA: **pisa** lo que devuelva el modelo de visión.
@@ -54,12 +62,24 @@ confirmar, que es el control de calidad de todo el proceso. Solo se centraliza l
   la sesión abierta (se recargó la página), se entra directo sin pedir la clave otra vez.
 
 **Identidad visual**: la misma línea que el resto de las apps de InSoft (referencia:
-el login de FactuMov). Isotipo en cuadrado redondeado tinta `#16181c` con el glifo en
-verde vivo `#22c55e`; wordmark en negrita al lado; título "Entrar"; tarjeta blanca
-bordeada; botón verde `#15803d` a todo el ancho; pie "Una app de ⬤ InSoft" con el
-toggle verde de InSoft (hecho en CSS, `.marca-insoft`). El isotipo propio de AutoFiller
-es una **"A" cuyo travesaño se estira más allá de la pata derecha**: el campo que se
-completa solo. Está en `web/logo.svg` y se usa también de favicon.
+el login de FactuMov, `factumov.insoft.net.ar`). Wordmark en negrita al lado del
+isotipo; título "Entrar"; tarjeta blanca bordeada; botón verde `#15803d` a todo el
+ancho; pie "Una app de ⬤ InSoft" con el toggle verde (hecho en CSS, `.marca-insoft`)
+enlazado a `insoft.net.ar`.
+
+El isotipo (`web/logo.svg`, también favicon) sigue la **familia de íconos de producto
+de InSoft**, calcada de `factumov-icon.svg`: caja de 120, cuadrado redondeado `#0F172A`
+con `rx 23`, la inicial de un solo trazo grueso de punta redonda (`stroke-width 13`,
+alto real 26–94) con el gradiente vertical de la pastilla de InSoft (`#2EBD59` →
+`#1B9E4B`, `userSpaceOnUse` sobre el alto de la letra, no sobre el bounding box), y un
+**punto blanco donde el trazo termina** — la cita al círculo del interruptor de InSoft,
+que es la idea de toda la marca. Sin ese punto el ícono queda fuera de la familia.
+El de AutoFiller es una **"A" cuyo travesaño se estira más allá de la pata derecha** y
+termina en el punto: el campo que se completa solo. El travesaño se pasa **lo justo para
+que el punto quede tocando la pata** (`cx 84` es la tangencia): así lo verde del
+interruptor queda adentro de la letra y lo único que asoma es el círculo blanco. La A
+salió angosta para que entrara el punto sin pisar la pata, y el travesaño va bajo
+(`y 72`) para que el contrapunzón triangular no se cierre.
 
 ### `agente/` — carga en SISalud (FastAPI en `127.0.0.1:8765`)
 
@@ -103,7 +123,11 @@ descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.e
 ### `AutoFiller.py` (escritorio) — se mantiene
 
 Sigue funcionando y es lo que usan hoy los operadores. Queda hasta que la web esté
-desplegada. Es el único lugar donde quedan las credenciales hardcodeadas.
+desplegada. Desde 2026-09-10 **ya no trae credenciales hardcodeadas**: los campos
+Usuario y Contraseña arrancan vacíos y `credenciales()` frena el procesamiento con
+un `messagebox` si falta alguno, en vez de intentar el login en blanco. La clave
+que estaba en el código sigue estando en el historial de git y dentro de
+`dist/AutoFiller.exe`: hay que **rotarla** y recompilar el `.exe`.
 
 
 ## Comportamiento de la pantalla frente a la automatización (verificado por CDP, 2026-09-09)
@@ -118,7 +142,7 @@ La pantalla es GeneXus y hostil a la automatización. Hallazgos firmes:
 - **Cancelar y Confirmar (verificado por CDP, 2026-09-09)**: los botones viven en `#TBL_BOTONES`, que está `display:none` con el formulario vacío y aparece con el comprobante cargado. **Cancelar** (`input[name=BUTTON2]`, evento GeneXus `E'RETURN'`) hace un POST y después **navega fuera de la pantalla** (vuelve atrás en el historial: en la prueba, a `about:blank`). **Confirmar** (`input[name=CONFIRMAR]`, evento `E'CONFIRMAR'`, atajo F12) **no se probó** porque graba un comprobante real y no hay entorno de prueba; se asume que al grabar navega o vuelve al formulario vacío (ambos casos los cubre `COMPROBANTE_EN_PANTALLA`). Confirmar en un lote real es la verificación pendiente.
 - **Navegación (aplicado)**: tras el login, `main()` va directo a la pantalla con `page.goto(url)` en vez de clickear el menú `Prestadores` → celda `Carga Rapida Comprobantes` (esos clicks a veces no avanzaban → el operador tenía que darlos a mano). El login se hace solo si aparece la caja de usuario (la sesión puede seguir abierta de una corrida anterior).
 - **Ceros a la izquierda**: los campos numéricos esperan el ancho completo del `maxlength` (`0005`, no `5`); un valor corto hace que GeneXus descarte la cabecera. El `extract_information` hace `lstrip('0')`, así que hay que re-padear al cargar.
-- **`maxlength=150` en la descripción**: recorta sin avisar. Las muestras traen 176–296 caracteres.
+- **`maxlength=150` en la descripción**: recorta sin avisar. Con el extractor viejo, 53 de las 63 muestras pasaban de 150 (176–339 caracteres) porque arrastraban las columnas numéricas del renglón. Desde que `extraer_descripcion()` las saca (2026-09-10), 45 caracteres menos en promedio y **27 de 63** siguen pasando de 150. Las que pasan las recorta el operador, viendo el contador en la web.
 
 ## Referencia de la pantalla SISalud (verificado por CDP contra la pantalla real)
 
@@ -136,9 +160,12 @@ Centros de costo confirmados por el usuario para cuatro de ellas: SANFELIU→Ola
 
 ## Problemas de la evaluación 2026-09 — estado
 
-Resueltos por la app web (siguen presentes en `AutoFiller.py`, que se mantiene):
+Resueltos por la app web (los demás siguen presentes en `AutoFiller.py`, que se
+mantiene):
 
 - **Credenciales hardcodeadas**: la web las pide y las manda solo al agente local.
+  El escritorio también las pide desde 2026-09-10 (queda pendiente rotar la clave
+  vieja, que está en el historial de git y en el `.exe` ya distribuido).
 - **Errores invisibles**: todo vuelve en `Resultado.error` / `avisos` y se ve en la
   cola. Un PDF sin `Hasta:` o sin `Importe Total:` ya no revienta.
 - **Dependencias del entorno**: la ruta de Chrome se busca en varias ubicaciones y se
@@ -192,6 +219,22 @@ Detalles resueltos:
 
 Los 4 dudosos cargan la provincia y el operador corrige si hace falta: ANTOLA y VALDIVIEZO (Jujuy, podría ser Mina Aguilar), BENITEZ (San Martín) y SANCHEZ (Los Polvorines), ambos Buenos Aires.
 
+**RESUELTO EN PRINCIPIO (2026-09-10): el padrón de SISalud da el dato exacto.**
+`extraccion/afiliado.py` saca el DNI y el número de afiliado del detalle facturado
+(**63/63** de las muestras traen al menos uno: 61 el DNI, 20 el número). Con ese DNI,
+la pantalla `servlet/wwafiliado` devuelve la **Delegación** del afiliado, y las 24
+delegaciones que son centro de costos coinciden por nombre exacto con el combo. Ver
+`pruebas/delegaciones.md` para la secuencia (ojo: hay que setear `Orden Por` ANTES,
+o los filtros se ignoran en silencio) y la tabla completa.
+
+Verificado contra los cuatro casos de centro de costos confirmado: **4 de 4**,
+incluido ANTOLA, que es el que la aproximación por domicilio erraba por 250 km.
+
+Falta decidir: las 25 delegaciones que no tienen centro de costos propio (agrupan a
+OLAVARRIA y otras, hay que confirmarlas como se confirmaron los alias de localidad),
+qué hacer si el DNI no está en el padrón, y que la consulta la haga el **agente**,
+que es quien tiene Chrome y sesión de SISalud.
+
 Sin resolver: el caso de fondo es que el prestador esté lejos de la seccional del afiliado. Ejemplo real confirmado: ANTOLA, prestadora en Perico (Jujuy) y centro de costos Mina Aguilar, a ~250 km. La única forma de resolverlo sería leer la seccional del afiliado en el padrón de SISalud a partir del DNI o número de afiliado que aparece en la descripción del detalle.
 
 ### 2. Comprobantes en foto (JPG/PNG/HEIC) — IMPLEMENTADO (2026-09-09)
@@ -216,6 +259,36 @@ Enfoque **híbrido QR + visión**, en `servidor/extraccion/`:
 Sin probar todavía contra fotos reales de celular: no hay muestras. Las 63 de
 `samples/` son todas PDF nativos.
 
+**Alternativa en evaluación (2026-09-10): OCR clásico en vez del modelo de visión.**
+Google Cloud Vision regala 1000 páginas por mes, que al volumen de AOMAOSAM
+probablemente sea gratis para siempre, y devuelve el mismo texto siempre (el
+modelo puede variar entre corridas). El harness es `pruebas/comparar_ocr.py`:
+rasteriza las muestras, las pasa por Cloud Vision y compara campo por campo
+contra el camino PDF, que es ground truth verificado.
+
+Resultado sobre las 63 muestras:
+
+| campo | exactas | similitud media |
+|---|---|---|
+| `fecha_vencimiento` (`Hasta:`) | **63/63** | 100 % |
+| `centro_costo` | **63/63** | 100 % |
+| `provincia` | **63/63** | 100 % |
+| `domicilio` | 59/63 | 99,9 % |
+| `descripcion` | 46/63 | 98,8 % |
+
+Los 4 domicilios que difieren son cosméticos (`Piso:1` vs `Piso: 1`) y no mueven
+el centro de costos, que da 63/63. Las 17 descripciones que difieren son ruido
+de OCR: 11 de ellas por 3 caracteres o menos (un acento, un guion). **El OCR
+sirve.** Lo que no mide esta prueba es la foto de celular: ángulo, sombra y
+foco. Para eso hacen falta fotos reales, y conviene que al menos algunas sean de
+comprobantes que también estén en PDF, para poder medirlas igual que a éstas.
+
+Llegar a esos números obligó a reescribir la extracción de la descripción (ver
+`extraer_descripcion` en `texto.py`): el primer intento usaba un ancla por
+layout y se rompía en los tres. El OCR también dejó a la vista dos bugs del
+camino PDF, ya arreglados: la descripción sucia y el `ORIGINAL` pegado al
+domicilio en `CAMPOS_JUNTO_AL_DOMICILIO`.
+
 ### 3. App web — IMPLEMENTADO (2026-09-09)
 
 Ver "Arquitectura" arriba. Se descartó la web pura (todo headless en el servidor)
@@ -236,8 +309,13 @@ operador antes de confirmar.
 - **Contra el escritorio (regresión)**: cargar `AutoFiller.py` sin la GUI
   (`src.split("# Crear ventana principal")[0]` + `exec`; la GUI arranca sola al
   importarlo) y comparar `extract_information()` con `extraer()` campo por campo
-  sobre las 63 muestras. Al portar dio 63/63 idénticos: si una vuelve a diferir,
-  es una regresión.
+  sobre las 63 muestras. Al portar dio 63/63 idénticos. **Desde 2026-09-10 la
+  `descripcion` difiere a propósito en las 63**: el escritorio se trae las
+  columnas numéricas del renglón y la web no. Los demás campos siguen siendo
+  63/63; si alguno de ésos vuelve a diferir, es una regresión.
+- **El camino OCR contra el camino PDF**: `python pruebas\comparar_ocr.py`. Ver
+  `pruebas/LEEME.md`. Necesita `GOOGLE_VISION_API_KEY` para las muestras que no
+  estén cacheadas; con `--solo-cache` no gasta cuota.
 - **El servidor**: `servidor\iniciar.bat` y `POST /api/extraer` con `curl -F`. Ojo con
   los nombres de archivo con espacios: `curl` los parte y el pedido nunca sale.
 - **El agente, sin tocar SISalud**: `agente\iniciar.bat` y pegarle a `/api/salud`,

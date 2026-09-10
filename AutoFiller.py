@@ -5,7 +5,7 @@
 import asyncio
 from playwright.async_api import async_playwright
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, messagebox
 import pdfplumber
 import re
 import pikepdf
@@ -978,11 +978,29 @@ class Factura():
         self.centro_costo = centro_costo
         self.centro_costo_nombre = centro_costo_nombre
 
+def credenciales():
+    """Usuario y contrasena que cargo el operador, o None si falta alguno.
+
+    Antes venian hardcodeadas en el codigo: eran las de una operadora real y
+    viajaban dentro del .exe. Ahora las carga quien usa el programa."""
+    usuario = user_var.get().strip()
+    contrasena = pass_var.get()
+    if not usuario or not contrasena:
+        messagebox.showerror(
+            "Faltan las credenciales",
+            "Cargue su usuario y contrasena de SISalud antes de procesar.")
+        return None
+    return usuario, contrasena
+
+
 def start_processing(factura):
     # Los avisos se muestran como cartel dentro de la propia pantalla de SISalud
     # (mostrar_avisos_en_pantalla), que es donde el operador está mirando. No se
     # usa messagebox: aparecía detrás del navegador y era redundante.
-    asyncio.run(main(user_var.get(), pass_var.get() , factura))
+    acceso = credenciales()
+    if acceso is None:
+        return
+    asyncio.run(main(acceso[0], acceso[1], factura))
     sys.exit(0)
 
 # Crear ventana principal
@@ -997,8 +1015,7 @@ user_var = tk.StringVar()
 pass_var = tk.StringVar()
 progreso_var = tk.StringVar()
 
-user_var.set("PLEONETTI@OSAM")
-pass_var.set("Rosario434")
+# Las credenciales las carga el operador: son suyas y no van en el codigo.
 
 # Estilo de colores
 bg_color = "#ffffff"  # Blanco para los paneles
@@ -1080,6 +1097,9 @@ def select_folder():
 def start_lote(carpeta):
     """Corre el lote en un hilo aparte para que la ventana siga respondiendo y
     pueda mostrar el progreso; al terminar muestra el resumen."""
+    acceso = credenciales()
+    if acceso is None:
+        return
     for b in (process_button, boton_archivo, boton_carpeta):
         if b:
             b.config(state="disabled")
@@ -1092,7 +1112,7 @@ def start_lote(carpeta):
         error = None
         resultados = []
         try:
-            resultados = asyncio.run(procesar_lote(user_var.get(), pass_var.get(), carpeta, informar))
+            resultados = asyncio.run(procesar_lote(acceso[0], acceso[1], carpeta, informar))
         except Exception as e:
             error = e
         app.after(0, lambda: terminar_lote(carpeta, resultados, error))

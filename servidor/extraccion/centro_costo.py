@@ -78,8 +78,14 @@ ALIAS_PROVINCIA = {
 }
 
 # Campos que en el PDF vienen pegados al domicilio, en la misma linea o al final
-# de la continuacion, porque ARCA arma la cabecera en dos columnas.
-CAMPOS_JUNTO_AL_DOMICILIO = r"(?:CUIT|Ingresos\s+Brutos|Condici|IVA|Fecha|Per[ií]odo|Domicilio)"
+# de la continuacion, porque ARCA arma la cabecera en dos columnas. ORIGINAL /
+# DUPLICADO / TRIPLICADO son el rotulo del ejemplar, que en la lectura por OCR
+# cae junto al domicilio (verificado en OVIEDO 07: "Ruta 270 - Caucete, San Juan
+# ORIGINAL", que sin esto se llevaba puesta la provincia y el centro de costos).
+CAMPOS_JUNTO_AL_DOMICILIO = (
+    r"(?:CUIT|Ingresos\s+Brutos|Condici|IVA|Fecha|Per[ií]odo|Domicilio"
+    r"|ORIGINAL|DUPLICADO|TRIPLICADO)"
+)
 
 PROVINCIAS_CONOCIDAS = set(CENTROS_COSTO_POR_PROVINCIA) | PROVINCIAS_SIN_CENTRO_COSTO
 

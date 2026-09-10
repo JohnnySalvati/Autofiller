@@ -16,14 +16,32 @@ El QR de ARCA manda sobre lo que devuelva el modelo para los datos fiscales
 import base64
 import io
 import json
+import logging
 import os
 
-# Lado maximo recomendado por Anthropic para imagenes: mas grande solo agrega
-# tokens sin mejorar la lectura.
-LADO_MAXIMO = 1568
+registro = logging.getLogger(__name__)
+
+# Lado maximo de la imagen que se manda. 1568 es el tope que recomienda
+# Anthropic: mas grande solo agrega tokens. Pero es un TOPE, no un optimo: los
+# tokens de imagen son ancho*alto/750, asi que bajarlo achica el costo de forma
+# lineal y una factura de ARCA es texto con etiquetas, no una foto de detalle.
+# Es configurable para poder medir donde empieza a fallar la lectura en fotos
+# reales de celular, que es lo que decide el valor definitivo.
+LADO_MAXIMO = int(os.environ.get("AUTOFILLER_LADO_MAXIMO", "1568"))
 
 MODELO = os.environ.get("AUTOFILLER_MODELO_VISION", "claude-opus-5")
 ESFUERZO = os.environ.get("AUTOFILLER_ESFUERZO_VISION", "medium")
+
+# Precios de lista por millon de tokens (entrada, salida), en dolares.
+# Referencia de sep-2026: sirve para que el log muestre el costo real medido en
+# vez de una estimacion, no como fuente de verdad. Un modelo que no este aca se
+# registra igual, solo sin la linea de costo.
+PRECIOS = {
+    "claude-opus-5": (5.0, 25.0),
+    "claude-opus-4-8": (5.0, 25.0),
+    "claude-sonnet-5": (2.0, 10.0),
+    "claude-haiku-4-5": (1.0, 5.0),
+}
 
 INSTRUCCIONES = """Sos un lector de facturas electrónicas argentinas (ARCA/AFIP).
 Extraés los campos de la imagen y devolvés el JSON pedido, sin comentarios.
@@ -81,7 +99,7 @@ def disponible():
 
 
 def a_jpeg_base64(imagen):
-    """Achica la imagen y la codifica en JPEG base64 para mandarla a la API."""
+    """(base64, ancho, alto) de la imagen achicada y codificada en JPEG."""
     from PIL import Image
 
     imagen = imagen.convert("RGB")
@@ -92,7 +110,38 @@ def a_jpeg_base64(imagen):
         imagen = imagen.resize(nuevo, Image.LANCZOS)
     buffer = io.BytesIO()
     imagen.save(buffer, format="JPEG", quality=85)
-    return base64.standard_b64encode(buffer.getvalue()).decode("ascii")
+    datos = base64.standard_b64encode(buffer.getvalue()).decode("ascii")
+    return datos, imagen.width, imagen.height
+
+
+def _registrar_consumo(respuesta, ancho, alto):
+    """Deja en el log los tokens y el costo REALES de la llamada.
+
+    Existe porque el costo por comprobante se venia estimando, y la estimacion
+    dependia de cuantos tokens ocupa la imagen (ancho*alto/750), que es
+    justamente lo que se puede ajustar con LADO_MAXIMO. Con esto se mide en vez
+    de calcular: es el numero que decide si conviene bajar la resolucion, bajar
+    de modelo o irse a un OCR.
+    """
+    uso = getattr(respuesta, "usage", None)
+    if uso is None:
+        return
+
+    entrada = getattr(uso, "input_tokens", 0) or 0
+    salida = getattr(uso, "output_tokens", 0) or 0
+    partes = [
+        f"vision {MODELO} esfuerzo={ESFUERZO}",
+        f"imagen {ancho}x{alto} (~{ancho * alto // 750} tok)",
+        f"entrada {entrada}",
+        f"salida {salida}",
+    ]
+
+    precio = PRECIOS.get(MODELO)
+    if precio:
+        costo = (entrada * precio[0] + salida * precio[1]) / 1_000_000
+        partes.append(f"USD {costo:.5f} (x1000 = USD {costo * 1000:.2f})")
+
+    registro.info(" | ".join(partes))
 
 
 def leer_comprobante(imagen):
@@ -105,6 +154,7 @@ def leer_comprobante(imagen):
 
     import anthropic
 
+    datos, ancho, alto = a_jpeg_base64(imagen)
     cliente = anthropic.Anthropic()
     respuesta = cliente.messages.create(
         model=MODELO,
@@ -119,13 +169,14 @@ def leer_comprobante(imagen):
                     "source": {
                         "type": "base64",
                         "media_type": "image/jpeg",
-                        "data": a_jpeg_base64(imagen),
+                        "data": datos,
                     },
                 },
                 {"type": "text", "text": "Extraé los campos de este comprobante."},
             ],
         }],
     )
+    _registrar_consumo(respuesta, ancho, alto)
 
     if respuesta.stop_reason == "refusal":
         raise RuntimeError("El modelo no pudo procesar la imagen.")

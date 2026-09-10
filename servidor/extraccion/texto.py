@@ -22,6 +22,86 @@ from .modelo import TIPOS_COMPROBANTE
 # lo ponen.
 REGEX_IMPORTE = r"Importe Total:\s*\$?\s*([\d,]+(?:\.\d+)?)"
 
+# Donde arranca el detalle. Es el ancla comun a todos los ordenes de lectura.
+REGEX_ENCABEZADO_DETALLE = re.compile(r"Producto\s*/\s*Servicio", re.IGNORECASE)
+
+# Los otros encabezados de columna. Segun quien lea la factura pueden venir
+# todos en una linea, cada uno en la suya, antes de la descripcion o despues,
+# asi que se sacan de donde esten. Dos condiciones los distinguen del texto de
+# la descripcion: van SIN dos puntos (el detalle muchas veces dice "Cantidad: 8
+# sesiones mensuales" y ahi no hay que tocar nada) y vienen de a varios
+# seguidos. Un "Cantidad" suelto en medio de una frase no se toca.
+REGEX_CABECERAS_DETALLE = re.compile(
+    r"(?:\s*(?:C[oó]digo|Cantidad|U\.\s*Medida|Precio\s*Unit\.?|%\s*Bonif\.?"
+    r"|Imp\.\s*Bonif\.?|Subtotal)(?!\s*:)){2,}",
+    re.IGNORECASE,
+)
+
+# Donde termina el detalle: el primero de los bloques que ARCA imprime despues.
+# Sin IGNORECASE a proposito — 'ORIGINAL' es el rotulo del comprobante y viene
+# siempre en mayusculas; una descripcion podria decir 'original' en minuscula.
+REGEX_FIN_DETALLE = re.compile(
+    r"Subtotal:\s*\$|R[ée]gimen\s+de\s+Transparencia|Importe\s+Otros\s+Tributos"
+    r"|IVA\s+Contenido|\bARCA\b|AGENCIA\s+DE\s+RECAUDACI"
+    r"|P[áa]g\.\s*\d|CAE\s*N|\bORIGINAL\b|\bDUPLICADO\b|\bTRIPLICADO\b"
+    r"|Ingresos\s+Brutos|Fecha\s+de\s+Inicio\s+de\s+Actividades"
+)
+
+# Las seis columnas del renglon: cantidad, unidad de medida, precio unitario,
+# % bonif, imp. bonif y subtotal ("12,00 unidades 20127,95 0,00 0,00 241535,40").
+# La unidad puede ser de una o dos palabras ("otras unidades"). Cinco numeros con
+# dos decimales alrededor de una unidad: no hay descripcion que se parezca a eso.
+REGEX_COLUMNAS_DETALLE = re.compile(
+    r"\s*[\d.]+,\d{2}\s+(?:\S+\s+){1,2}[\d.]+,\d{2}\s+[\d.]+,\d{2}"
+    r"\s+[\d.]+,\d{2}\s+[\d.]+,\d{2}\s*"
+)
+
+
+def extraer_descripcion(text):
+    """Descripcion del detalle, sirviendo cualquier orden de lectura.
+
+    La misma factura da textos distintos segun quien la lea. Verificado sobre
+    las 63 muestras (pdfplumber) y sus 62 lecturas por OCR (Cloud Vision),
+    aparecen tres acomodos:
+
+      POR FILAS (pdfplumber): el encabezado entero en una linea, y las columnas
+      numericas pegadas al final de la PRIMERA linea de la descripcion.
+
+      POR BLOQUES: primero toda la descripcion junta, y recien despues, en otro
+      bloque, los encabezados y los numeros.
+
+      MIXTO: los encabezados juntos arriba, y despues la descripcion con las
+      columnas numericas intercaladas en el medio.
+
+    En vez de una regla por acomodo —que fue el primer intento y se rompio en
+    los tres— se recorta una sola vez de punta a punta y se le RESTA lo que no
+    es descripcion: los encabezados de columna y el renglon numerico. Lo que
+    queda es la descripcion, venga en el orden que venga.
+    """
+    encabezado = REGEX_ENCABEZADO_DETALLE.search(text)
+    if not encabezado:
+        return ""
+
+    cuerpo = text[encabezado.end():]
+
+    fin = REGEX_FIN_DETALLE.search(cuerpo)
+    if fin:
+        cuerpo = cuerpo[:fin.start()]
+
+    cuerpo = REGEX_CABECERAS_DETALLE.sub(" ", cuerpo)
+
+    columnas = REGEX_COLUMNAS_DETALLE.search(cuerpo)
+    if columnas:
+        partes = columnas.group(0).split()
+        cuerpo = cuerpo[:columnas.start()] + " " + cuerpo[columnas.end():]
+        # "otras unidades" es la unica unidad de medida de dos palabras (21 de
+        # las 63 muestras). Cuando la columna se parte en dos filas, pdfplumber
+        # deja "unidades" suelta mas adelante y arriba solo se llevo "otras".
+        if partes[1:-4] == ["otras"]:
+            cuerpo = re.sub(r"\bunidades\b", " ", cuerpo, count=1, flags=re.IGNORECASE)
+
+    return " ".join(cuerpo.split())
+
 
 def codigo_arca(text):
     """Codigo de comprobante de ARCA ('011' -> '11')."""
@@ -95,8 +175,12 @@ def datos_desde_texto(text):
     if not importe:
         avisos.append("No se encontró el 'Importe Total' en la factura.")
 
-    # La descripcion del detalle es todo lo que hay entre los dos 'Subtotal'.
-    descripcion = buscar(text, r"(?<=Subtotal)(.*?)(?=Subtotal)", re.DOTALL | re.IGNORECASE)
+    descripcion = extraer_descripcion(text)
+    if not descripcion:
+        avisos.append(
+            "No se encontró el detalle facturado: la descripción queda vacía y "
+            "la tenés que escribir vos."
+        )
 
     punto_venta, nro_factura = punto_venta_y_numero(text)
     centro_costo_nombre, centro_costo = centro_costo_de_domicilio(domicilio)
@@ -111,7 +195,7 @@ def datos_desde_texto(text):
         "fecha_vencimiento": fecha_hasta,
         "fecha_devengamiento": fecha_hasta,
         "cae": buscar(text, r"CAE N°:\s*(\d+)"),
-        "descripcion": " ".join((descripcion or "").split()),
+        "descripcion": descripcion,
         "importe": importe,
         "domicilio": domicilio,
         "provincia": provincia_de_domicilio(domicilio),
