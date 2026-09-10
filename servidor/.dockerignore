@@ -1,0 +1,9 @@
+# El .venv es de Windows: adentro de la imagen no sirve para nada y pesa cientos de MB.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Las claves de desarrollo NO entran a la imagen. En produccion llegan por el .env de
+# la VM, que lee docker compose (env_file), no por un archivo copiado adentro.
+.env

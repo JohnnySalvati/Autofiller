@@ -45,6 +45,10 @@ no trae.
 
 ## Arrancar
 
+Para **producción** —la VM detrás de srv-nginx, en `autofiller.insoft.net.ar`— el
+procedimiento entero está en [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Lo de acá abajo
+es para levantarlo a mano en una máquina cualquiera.
+
 **Servidor** (una vez, donde vaya a quedar):
 
 ```bat

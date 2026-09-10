@@ -1,0 +1,40 @@
+# Stack de produccion para la VM (192.168.100.16), detras de srv-nginx (192.168.100.9),
+# que termina el HTTPS y proxea por HTTP al puerto 8002 de esta VM.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Un solo servicio, y es a proposito:
+#
+#   - No hay base de datos. El servidor no guarda nada: cada comprobante se procesa en
+#     memoria y se descarta. Un redeploy no puede perder datos porque no hay datos.
+#   - No hay contenedor `web`. La interfaz es HTML/CSS/JS plano que sirve el propio
+#     FastAPI con StaticFiles, asi que no hay `dist` que construir ni prefijo /api que
+#     reescribir, que es lo que en FactuMov justifica su nginx propio.
+#   - El agente NO va aca. Corre en la PC de cada operador, que es la unica que tiene
+#     el Chrome con la sesion de SISalud. Ver docs/DEPLOYMENT.md § 5.
+#
+# El .env de produccion vive en la raiz del repo **en la VM**, nunca en git. La copia de
+# referencia de que va adentro es .env.example.
+services:
+  app:
+    build:
+      context: ./servidor
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # 8002 y no 8000 ni 8001: esos ya son de Balance360 y de FactuMov. Este puerto no
+      # sale nunca de la LAN; la puerta desde internet es el 443 de srv-nginx.
+      - "8002:8000"
+    healthcheck:
+      # Sin curl en la imagen slim, asi que el chequeo lo hace el Python que ya esta.
+      # /api/opciones es el endpoint mas barato que igual ejercita la app entera: si
+      # importa la extraccion y contesta, el servidor sirve.
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/opciones', timeout=3)
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
