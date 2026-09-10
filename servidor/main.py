@@ -23,8 +23,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from extraccion import EXTENSIONES_ACEPTADAS, extraer
+from extraccion import EXTENSIONES_ACEPTADAS, MOTOR, extraer
 from extraccion.modelo import CENTROS_COSTO, NOMBRES_TIPO_COMPROBANTE, Resultado
+from extraccion.ocr import disponible as ocr_disponible
 from extraccion.vision import MODELO, disponible as vision_disponible
 
 # uvicorn solo configura sus propios loggers: sin esto, el logging de la
@@ -48,17 +49,39 @@ class Opciones(BaseModel):
     tipos_comprobante: dict
     centros_costo: dict
     lectura_de_fotos: bool
+    motor_lectura: str
     modelo_vision: str
     extensiones: list
+
+
+def _motor_lectura():
+    """Con que se van a leer las fotos, en castellano, para el chip de la web.
+
+    Hay dos motores y cualquiera de los dos alcanza, asi que el chip tiene que
+    decir cual esta activo: 'Fotos: sí' con OCR y con el modelo significan la
+    misma funcionalidad pero distinto costo y distinta repetibilidad.
+    """
+    ocr = ocr_disponible() and MOTOR in ("auto", "ocr")
+    modelo = vision_disponible() and MOTOR in ("auto", "vision")
+
+    if ocr and modelo:
+        return f"OCR de Cloud Vision, con {MODELO} de respaldo"
+    if ocr:
+        return "OCR de Cloud Vision"
+    if modelo:
+        return MODELO
+    return ""
 
 
 @app.get("/api/opciones", response_model=Opciones)
 def opciones():
     """Lo que la interfaz necesita para armar los desplegables y avisar al operador."""
+    motor = _motor_lectura()
     return Opciones(
         tipos_comprobante=NOMBRES_TIPO_COMPROBANTE,
         centros_costo=CENTROS_COSTO,
-        lectura_de_fotos=vision_disponible(),
+        lectura_de_fotos=bool(motor),
+        motor_lectura=motor,
         modelo_vision=MODELO if vision_disponible() else "",
         extensiones=sorted(EXTENSIONES_ACEPTADAS),
     )

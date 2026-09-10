@@ -114,10 +114,10 @@ function dibujarChips() {
 
   if (estado.opciones) {
     if (estado.opciones.lectura_de_fotos) {
-      agregar("Fotos: sí", "ok", "Modelo: " + estado.opciones.modelo_vision);
+      agregar("Fotos: sí", "ok", "Se leen con: " + estado.opciones.motor_lectura);
     } else {
       agregar("Fotos: no", "tibio",
-              "El servidor no tiene configurada la lectura de fotos (falta ANTHROPIC_API_KEY). Solo PDF.");
+              "El servidor no tiene configurada la lectura de fotos (falta GOOGLE_VISION_API_KEY o ANTHROPIC_API_KEY). Solo PDF.");
     }
   }
 }
@@ -374,8 +374,10 @@ function dibujarItem(item) {
         origen.style.marginTop = "12px";
         origen.textContent = {
           "pdf-texto": "Leído del texto del PDF.",
-          "pdf-imagen": "El PDF venía escaneado: se leyó como imagen.",
-          "foto": "Leído de la foto (QR de ARCA + lectura de imagen).",
+          "pdf-imagen-ocr": "El PDF venía escaneado: se leyó como imagen, con OCR.",
+          "pdf-imagen-vision": "El PDF venía escaneado: se leyó como imagen, con el modelo.",
+          "foto-ocr": "Leído de la foto (QR de ARCA + OCR).",
+          "foto-vision": "Leído de la foto (QR de ARCA + modelo de visión).",
         }[item.origen] || "";
         cuerpo.appendChild(origen);
       }

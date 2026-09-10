@@ -58,19 +58,25 @@ ssh johnny@192.168.100.16
 git clone https://github.com/JohnnySalvati/Autofiller.git
 cd Autofiller
 cp .env.example .env
-nano .env            # como mínimo, ANTHROPIC_API_KEY
+nano .env            # al menos una de las dos claves de lectura (ver abajo)
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f app
 ```
 
-**Sin `ANTHROPIC_API_KEY` la app arranca igual** y lee PDFs, pero no comprobantes en
-foto — que es justamente lo que destraba a los dos operadores que hoy no usan AutoFiller.
-La web lo avisa con el chip «Fotos: no», y es fácil no mirarlo: verificalo con el punto 2
-de la § 4.
+**Las fotos necesitan una clave de lectura, y hay dos motores**: `GOOGLE_VISION_API_KEY`
+(OCR de Cloud Vision, el camino por defecto: gratis hasta 1000 páginas por mes y
+determinístico) y `ANTHROPIC_API_KEY` (modelo de visión de Claude, el respaldo para
+cuando el OCR devuelve algo que los regex de ARCA no parsean). Con cualquiera de las dos
+la app lee fotos; lo recomendado es tener las dos.
+
+**Sin ninguna la app arranca igual** y lee PDFs, pero no comprobantes en foto — que es
+justamente lo que destraba a los dos operadores que hoy no usan AutoFiller. La web lo
+avisa con el chip «Fotos: no», y es fácil no mirarlo: verificalo con el punto 2 de la
+§ 4.
 
 Del `.env`, `docker compose` solo le pasa al contenedor las variables declaradas en
 `env_file`. Una variable con el valor vacío llega como cadena vacía, que para
-`ANTHROPIC_API_KEY` es lo mismo que no tenerla.
+las dos claves de lectura es lo mismo que no tenerlas.
 
 ---
 
@@ -83,7 +89,7 @@ symlink en `sites-enabled/`.
 Primero el archivo de contraseñas. Es la **única** autenticación del servidor: la
 pantalla «Entrar» de la app pide las credenciales de SISalud, que viajan al agente en la
 PC del operador y nunca al servidor, así que sin esto `/api/extraer` queda abierto a
-internet y cualquiera puede gastar la clave de la API de visión.
+internet y cualquiera puede gastar tu cuota de lectura de comprobantes.
 
 ```bash
 sudo apt install apache2-utils          # si no está
@@ -150,9 +156,11 @@ Ninguna de estas cosas avisa sola si está mal.
 # 1. El contenedor arriba y "healthy" (tarda hasta 20 s en pasar de "starting")
 docker compose -f docker-compose.prod.yml ps
 
-# 2. La lectura de fotos está habilitada. Si "lectura_de_fotos" es false, falta la
-#    ANTHROPIC_API_KEY en el .env y el servidor NO lo dice por ningún otro lado.
-curl -s localhost:8002/api/opciones | head -c 300
+# 2. La lectura de fotos está habilitada, y con qué motor. Si "lectura_de_fotos" es
+#    false, no hay NINGUNA de las dos claves en el .env, y el servidor no lo dice por
+#    ningún otro lado. (Nada de `head -c`: los 24 centros de costo ocupan el medio del
+#    JSON y el campo que importa queda después.)
+curl -s localhost:8002/api/opciones | grep -o '"lectura_de_fotos":[a-z]*\|"motor_lectura":"[^"]*"'
 
 # 3. La web se sirve
 curl -s -o /dev/null -w '%{http_code}\n' localhost:8002/
@@ -238,7 +246,9 @@ segundos. No hay volúmenes ni base: un redeploy es reemplazar el contenedor y n
 - **504 leyendo una foto.** Es el `proxy_read_timeout`. Como la web manda un
   comprobante por pedido, un 504 es una foto sola que tardó de más, no una tanda: se
   reintenta esa y las demás no se tocan.
-- **«Fotos: no» en la web.** Falta `ANTHROPIC_API_KEY` en el `.env` de la VM. Ojo:
+- **«Fotos: no» en la web.** No hay ninguna de las dos claves de lectura
+  (`GOOGLE_VISION_API_KEY` / `ANTHROPIC_API_KEY`) en el `.env` de la VM. Si el chip dice
+  «Fotos: sí», al pasarle el mouse aclara con cuál de los dos motores se van a leer. Ojo:
   `servidor/.env` existe en la máquina de desarrollo pero **no lo lee nadie** —el
   proyecto no usa `python-dotenv`, las claves salen del entorno—, así que copiarlo a la
   VM no alcanza. Lo que manda es el `.env` de la raíz, que lee `docker compose`.

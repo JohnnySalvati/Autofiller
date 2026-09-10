@@ -48,12 +48,24 @@ confirmar, que es el control de calidad de todo el proceso. Solo se centraliza l
   SISalud metidas en el medio del texto.
 - `extraccion/qr.py`: QR de ARCA (`zxing-cpp`, sin DLL externa como necesitaría
   `pyzbar`). El payload trae CUIT, tipo, punto de venta, número, fecha, importe y CAE
-  firmados por ARCA: **pisa** lo que devuelva el modelo de visión.
+  firmados por ARCA: **pisa** lo que devuelva cualquiera de los dos motores.
+- `extraccion/ocr.py` (2026-09-10): OCR de Google Cloud Vision por REST con una API
+  key y el `urllib` de la stdlib — sin SDK, sin dependencia nueva. Es el **motor por
+  defecto** del camino de imagen: su texto va a los mismos regex de `texto.py` que un
+  PDF. No cachea (el harness sí, para no quemar cuota iterando sobre las 63 muestras;
+  acá cada comprobante se ve una vez). `LADO_MAXIMO` es 3000 y **no** es el 1568 de
+  `vision.py`: ahí achicar ahorra tokens, acá se paga por página y achicar solo
+  perjudica al OCR; 3000 deja intacto lo que se midió (200 dpi = 2339 px en A4).
 - `extraccion/vision.py`: Claude con visión, salida estructurada por `json_schema`.
-  Aporta lo que el QR no trae: período (`Hasta:`), descripción del detalle y
-  domicilio comercial. Modelo por defecto `claude-opus-5`, esfuerzo `medium`,
-  ambos configurables por entorno. Sin `ANTHROPIC_API_KEY` la app anda igual con
-  PDFs y la web lo avisa con un chip.
+  Es el **respaldo**: entra cuando el OCR falla, devuelve algo que no parece una
+  factura de ARCA, o no saca ninguno de `CAMPOS_DE_LECTURA` (período, descripción,
+  domicilio — lo único que el QR no trae). Modelo por defecto `claude-opus-5`,
+  esfuerzo `medium`, ambos configurables por entorno.
+  `AUTOFILLER_MOTOR_LECTURA` (`auto` | `ocr` | `vision`) fuerza un motor para poder
+  medirlos. Con cualquiera de las dos claves la app lee fotos; sin ninguna anda igual
+  con PDFs y la web lo avisa con un chip que dice qué motor quedó activo. El `origen`
+  del resultado distingue los dos caminos (`foto-ocr`, `foto-vision`, y los
+  `pdf-imagen-*`), así que en la web se ve con qué se leyó cada comprobante.
 - `extraccion/centro_costo.py`: la lógica del requerimiento 1, portada tal cual. El
   único cambio es la firma: toma el domicilio ya extraído en vez del texto entero,
   porque en el camino de foto el domicilio lo trae la visión, no un regex.
@@ -259,7 +271,7 @@ Enfoque **híbrido QR + visión**, en `servidor/extraccion/`:
 Sin probar todavía contra fotos reales de celular: no hay muestras. Las 63 de
 `samples/` son todas PDF nativos.
 
-**Alternativa en evaluación (2026-09-10): OCR clásico en vez del modelo de visión.**
+**IMPLEMENTADO (2026-09-10): OCR clásico como motor por defecto, modelo de respaldo.**
 Google Cloud Vision regala 1000 páginas por mes, que al volumen de AOMAOSAM
 probablemente sea gratis para siempre, y devuelve el mismo texto siempre (el
 modelo puede variar entre corridas). El harness es `pruebas/comparar_ocr.py`:

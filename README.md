@@ -37,11 +37,17 @@ partida en dos, y solo la mitad que **lee** los comprobantes vive en el servidor
 |---|---|
 | PDF de ARCA | `pdfplumber` + regex. Exacto y gratis. |
 | PDF escaneado | Se rasteriza la primera página y se trata como foto. |
-| Foto (JPG/PNG/HEIC/…) | QR de ARCA para los datos fiscales + modelo de visión de Claude para el período, la descripción y el domicilio. |
+| Foto (JPG/PNG/HEIC/…) | QR de ARCA para los datos fiscales + OCR de Cloud Vision, y los mismos regex que un PDF, para el período, la descripción y el domicilio. Si el OCR no sirve, un modelo de visión de Claude. |
 
 El QR trae CUIT, tipo, punto de venta, número, fecha, importe y CAE **firmados por
-ARCA**, así que pisa lo que devuelva el modelo. La visión solo aporta lo que el QR
-no trae.
+ARCA**, así que pisa lo que devuelva cualquiera de los dos motores. La lectura de la
+imagen solo aporta lo que el QR no trae.
+
+**Por qué el OCR va primero**: Google regala 1000 páginas por mes —al volumen de
+AOMAOSAM, probablemente gratis para siempre— y devuelve siempre el mismo texto,
+mientras que el modelo puede variar entre corridas. Se midió contra las 63 muestras:
+63/63 en período, centro de costos y provincia. El modelo queda de respaldo, para
+cuando el OCR falla o devuelve algo que los regex de ARCA no parsean.
 
 ## Arrancar
 
@@ -52,12 +58,14 @@ es para levantarlo a mano en una máquina cualquiera.
 **Servidor** (una vez, donde vaya a quedar):
 
 ```bat
+set GOOGLE_VISION_API_KEY=...
 set ANTHROPIC_API_KEY=sk-ant-...
 servidor\iniciar.bat
 ```
 
-Queda en `http://localhost:8000`. Sin `ANTHROPIC_API_KEY` anda igual, pero solo
-con PDF: la web lo avisa con el chip «Fotos: no».
+Queda en `http://localhost:8000`. Para leer fotos alcanza con **cualquiera de las dos
+claves**; sin ninguna anda igual, pero solo con PDF, y la web lo avisa con el chip
+«Fotos: no».
 
 **Agente** (en cada PC que carga comprobantes):
 
@@ -133,7 +141,9 @@ python -c "from extraccion import extraer;     print(extraer('x.pdf', open('../s
 
 | Variable | Dónde | Para qué |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | servidor | Habilita la lectura de fotos. |
+| `GOOGLE_VISION_API_KEY` | servidor | OCR de Cloud Vision: el motor por defecto para fotos. |
+| `ANTHROPIC_API_KEY` | servidor | Modelo de visión: el respaldo cuando el OCR no sirve. |
+| `AUTOFILLER_MOTOR_LECTURA` | servidor | `auto` (default), `ocr` o `vision`. Forzar uno sirve para medirlos. |
 | `AUTOFILLER_MODELO_VISION` | servidor | Modelo de visión. Por defecto `claude-opus-5`. |
 | `AUTOFILLER_ESFUERZO_VISION` | servidor | `low`…`max`. Por defecto `medium`. |
 | `AUTOFILLER_TAMANIO_MAXIMO_MB` | servidor | Tope por archivo. Por defecto 25. |
