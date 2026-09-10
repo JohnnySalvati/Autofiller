@@ -185,38 +185,43 @@ async function agregarArchivos(archivos) {
   estado.cola.push(...nuevos);
   dibujarCola();
 
-  const cuerpo = new FormData();
-  Array.from(archivos).forEach((archivo) => cuerpo.append("archivos", archivo));
+  // Un pedido por comprobante, en serie. Mandar la tanda entera en un solo POST era
+  // peor por tres razones: si el pedido se caía —un corte, un 413, un 504— la tanda
+  // entera quedaba en "problema" aunque el servidor ya hubiera leído bien la mitad, y
+  // esas lecturas de fotos ya estaban pagadas; el operador no veía un solo resultado
+  // hasta que terminaba el último archivo; y el cuerpo del POST crecía sin techo, lo
+  // que obligaba a un client_max_body_size enorme en el nginx de adelante.
+  const lista = Array.from(archivos);
+  for (let i = 0; i < nuevos.length; i++) {
+    await leerComprobante(nuevos[i], lista[i]);
+  }
+}
 
-  let resultados;
+/** Lee un comprobante y actualiza su fila. No lanza: el error queda en la fila. */
+async function leerComprobante(item, archivo) {
+  const cuerpo = new FormData();
+  cuerpo.append("archivos", archivo);
+
   try {
     const respuesta = await fetch("/api/extraer", { method: "POST", body: cuerpo });
     if (!respuesta.ok) throw new Error("el servidor respondió " + respuesta.status);
-    resultados = await respuesta.json();
-  } catch (e) {
-    nuevos.forEach((item) => {
-      item.estado = "problema";
-      item.error = "No se pudo leer el comprobante: " + e.message;
-    });
-    dibujarCola();
-    return;
-  }
 
-  // El servidor devuelve un resultado por archivo, en el mismo orden.
-  nuevos.forEach((item, i) => {
-    const resultado = resultados[i];
-    if (!resultado) {
-      item.estado = "problema";
-      item.error = "El servidor no devolvió datos para este archivo.";
-      return;
-    }
+    // El endpoint sigue recibiendo y devolviendo una lista: acá siempre trae un solo
+    // elemento, pero el contrato no cambió.
+    const [resultado] = await respuesta.json();
+    if (!resultado) throw new Error("el servidor no devolvió datos");
+
     item.origen = resultado.origen;
     item.avisos = resultado.avisos || [];
     item.error = resultado.error || "";
     item.factura = resultado.factura;
     item.estado = resultado.error ? "problema"
                 : item.avisos.length ? "revisar" : "listo";
-  });
+  } catch (e) {
+    item.estado = "problema";
+    item.error = "No se pudo leer el comprobante: " + e.message;
+  }
+
   dibujarCola();
 }
 

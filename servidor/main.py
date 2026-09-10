@@ -13,6 +13,8 @@ en ningun ejecutable.
 No se guarda nada: cada archivo se procesa en memoria y se descarta.
 """
 
+import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -24,6 +26,14 @@ from pydantic import BaseModel
 from extraccion import EXTENSIONES_ACEPTADAS, extraer
 from extraccion.modelo import CENTROS_COSTO, NOMBRES_TIPO_COMPROBANTE, Resultado
 from extraccion.vision import MODELO, disponible as vision_disponible
+
+# uvicorn solo configura sus propios loggers: sin esto, el logging de la
+# extraccion (tokens y costo de cada llamada de vision) se descarta en silencio.
+logging.basicConfig(
+    level=os.environ.get("AUTOFILLER_LOG", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 WEB = Path(__file__).parent / "web"
 
@@ -67,7 +77,13 @@ async def api_extraer(archivos: list[UploadFile]):
                 error=f"El archivo pesa más de {TAMANIO_MAXIMO // (1024 * 1024)} MB.",
             ))
             continue
-        resultados.append(extraer(nombre, contenido))
+        # `extraer` es sincrónico y tarda: un PDF ocupa CPU y una foto se queda
+        # esperando al modelo de visión. Llamado derecho desde acá bloquearía el
+        # event loop y el servidor entero quedaría mudo mientras dura —dos operadores
+        # subiendo a la vez se serializan del todo, y hasta el healthcheck de Docker
+        # puede vencer y hacer que el contenedor se reinicie solo en medio de una
+        # tanda. En un hilo aparte, cada pedido avanza por su cuenta.
+        resultados.append(await asyncio.to_thread(extraer, nombre, contenido))
     return resultados
 
 
