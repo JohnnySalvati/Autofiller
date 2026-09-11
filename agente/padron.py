@@ -40,6 +40,7 @@ import re
 import time
 import unicodedata
 
+from operador import avisar
 from sisalud import esperar_genexus
 
 
@@ -245,16 +246,20 @@ async def centro_costo_del_afiliado(page, factura, avisos):
             await esperar_genexus(page)
             delegaciones = await page.evaluate(LEER_DELEGACION) or []
     except Exception as e:
-        avisos.append(
+        avisar(
+            avisos,
             f"No se pudo consultar el padrón de afiliados ({e}).\n"
-            "El Centro de Costos se dedujo del domicilio del prestador: revisalo."
+            "El Centro de Costos se dedujo del domicilio del prestador: revisalo.",
+            accion="Revisá el Centro de Costos.",
         )
         return None
 
     if not delegaciones:
-        avisos.append(
+        avisar(
+            avisos,
             "El afiliado del comprobante no apareció en el padrón. El Centro de "
-            "Costos se dedujo del domicilio del prestador: revisalo."
+            "Costos se dedujo del domicilio del prestador: revisalo.",
+            accion="Revisá el Centro de Costos.",
         )
         return None
 
@@ -262,10 +267,12 @@ async def centro_costo_del_afiliado(page, factura, avisos):
     # mismo documento: no hay forma de elegir, y elegir mal es peor que no elegir.
     distintas = {clave(d) for d in delegaciones}
     if len(distintas) > 1:
-        avisos.append(
+        avisar(
+            avisos,
             "El afiliado aparece en más de una delegación del padrón "
             f"({', '.join(sorted(distintas))}). El Centro de Costos quedó sin "
-            "cargar: elegilo antes de confirmar."
+            "cargar: elegilo antes de confirmar.",
+            accion="Elegí el Centro de Costos.",
         )
         return None
 
@@ -276,13 +283,17 @@ async def centro_costo_del_afiliado(page, factura, avisos):
             return centro
 
     if buscada in {clave(d) for d in DELEGACIONES_SIN_CENTRO_COSTO}:
-        avisos.append(
+        avisar(
+            avisos,
             f"El afiliado es de la delegación {delegacion}, que no tiene Centro "
-            "de Costos propio. Elegilo antes de confirmar."
+            "de Costos propio. Elegilo antes de confirmar.",
+            accion="Elegí el Centro de Costos.",
         )
     else:
-        avisos.append(
+        avisar(
+            avisos,
             f"La delegación del afiliado ({delegacion}) no está en la tabla de "
-            "Centros de Costo. Elegilo antes de confirmar."
+            "Centros de Costo. Elegilo antes de confirmar.",
+            accion="Elegí el Centro de Costos.",
         )
     return None

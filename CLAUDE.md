@@ -110,6 +110,22 @@ Es lo único que toca SISalud, y corre en la PC del operador.
   sección siguiente intactos (máscara, orden de carga, `fill` sin blur).
 - `operador.py`: el cartel inyectado en la pantalla, `ControlLote` (acá `Control`) y
   `esperar_resolucion`. Sin cambios de lógica; el botón dice "Detener la cola".
+  El cartel ocupa la **mitad izquierda** (`width:50%`, 2026-09-11): SISalud saca sus
+  propios mensajes arriba a la derecha —entre ellos el de "comprobante ya cargado"— y
+  a todo el ancho los tapaba. Esos mensajes son **pnotify** (`.ui-pnotify`, el de
+  jQuery: `$.pnotify`), verificado contra la pantalla real el 2026-09-11: `fixed`,
+  `top:18px`, `right:18px`, `z-index 9999`, 300 px de ancho. O sea que arrancan en
+  `ancho - 318`, y el cartel termina en `ancho / 2`: no se pisan mientras la ventana
+  pase de ~640 px. Medido a 1920×945 (lo que usa el operador): cartel 0–960, mensaje
+  1602–1902. Como es `fixed`, tampoco lo mueve el `padding-top` que el cartel le pone
+  al `body`.
+  El cartel muestra además **una línea por aviso** con lo que el operador tiene que
+  hacer ("Elegí el tipo de comprobante."), no el aviso entero: cada aviso lleva su
+  `accion` corta además del texto completo (`avisar(avisos, texto, accion=)`, y
+  `Avisos.acciones_cortas()` es lo que se inyecta), y el detalle —por qué falló, qué
+  ofrecía el combo, qué parte de la descripción se recortó— queda en la web y en el
+  log, que es donde hay lugar para leerlo. Un aviso sin `accion` cae en `resumir()`:
+  primer renglón recortado a 90 caracteres.
 - `navegador.py`: lanza/reutiliza Chrome con `--remote-debugging-port` y mantiene
   **una sola** pestaña para toda la cola. Busca `chrome.exe` en varias rutas y acepta
   `AUTOFILLER_CHROME` (antes estaba hardcodeada y fallaba en otras PCs).

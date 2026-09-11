@@ -22,7 +22,7 @@ import re
 import time
 import unicodedata
 
-from operador import avisar_leve
+from operador import avisar, avisar_leve
 
 URL_CARGA = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra?10,0"
 
@@ -108,11 +108,13 @@ async def elegir_tipo_comprobante(page, valor, avisos):
         disponibles = await page.evaluate(
             "() => { const s = document.getElementById('vTIPOCOMPROBANTECODIGO');"
             " return s ? Array.from(s.options).map(o => o.text).filter(t => t) : []; }")
-        avisos.append(
+        avisar(
+            avisos,
             "El tipo de comprobante de la factura no está disponible para este "
             "prestador.\n"
             f"SISalud ofrece: {', '.join(disponibles) or '(ninguno)'}\n"
-            "Elegí el tipo a mano antes de confirmar."
+            "Elegí el tipo a mano antes de confirmar.",
+            accion="Elegí el tipo de comprobante.",
         )
 
     if not valor:
@@ -207,9 +209,11 @@ async def elegir_prestador(page, cuit, avisos):
     try:
         await enlace.wait_for(state="visible", timeout=30000)
     except Exception:
-        avisos.append(
+        avisar(
+            avisos,
             f"El CUIT {cuit} no figura en el padrón de entidades de SISalud.\n"
-            "Hay que darlo de alta, o cargar el comprobante a mano."
+            "Hay que darlo de alta, o cargar el comprobante a mano.",
+            accion="El prestador no está en SISalud: cargalo a mano.",
         )
         # Sin esto la pantalla queda bloqueada por la mascara del popup.
         try:
@@ -245,9 +249,11 @@ async def revisar_cabecera(page, avisos):
             faltantes.append(etiqueta)
 
     if faltantes:
-        avisos.append(
+        avisar(
+            avisos,
             "Estos campos quedaron sin cargar, completalos antes de confirmar:\n- "
-            + "\n- ".join(faltantes)
+            + "\n- ".join(faltantes),
+            accion="Completá: " + ", ".join(faltantes) + ".",
         )
     return faltantes
 
@@ -320,7 +326,8 @@ async def cargar_factura(page, factura, avisos, centro_de_padron=False):
             avisos,
             f"La descripción tiene {len(descripcion)} caracteres y en la pantalla "
             f"entran {limite}.\nSe cargó recortada, revisala antes de confirmar:\n"
-            f"...{descripcion[int(limite):]}"
+            f"...{descripcion[int(limite):]}",
+            accion="La descripción entró recortada: revisala.",
         )
     await llenar(page, "vEXENTOCOMPROBANTEDETALLEDESCRIPCION", descripcion)
     await llenar(page, "vEXENTOCOMPROBANTEDETALLEPRECIOUNITARIO", factura.importe)
@@ -337,10 +344,12 @@ async def cargar_factura(page, factura, avisos, centro_de_padron=False):
     centro_costo = factura.centro_costo
     provincia_sisalud = None if centro_de_padron else await provincia_en_sisalud(page)
     if centro_costo and provincia_sisalud and provincia_sisalud != factura.provincia:
-        avisos.append(
+        avisar(
+            avisos,
             f"La provincia del comprobante ({factura.provincia}) no coincide con "
             f"la del prestador en SISalud ({provincia_sisalud}).\n"
-            "El Centro de Costos quedó sin cargar: elegilo antes de confirmar."
+            "El Centro de Costos quedó sin cargar: elegilo antes de confirmar.",
+            accion="Elegí el Centro de Costos.",
         )
         centro_costo = None
     if centro_costo:
@@ -348,7 +357,8 @@ async def cargar_factura(page, factura, avisos, centro_de_padron=False):
             await page.locator("#vEXENTOCENTROCOSTOCODIGO").select_option(
                 value=centro_costo, timeout=8000)
         except Exception:
-            avisos.append("No se pudo fijar el Centro de Costos: elegilo a mano.")
+            avisar(avisos, "No se pudo fijar el Centro de Costos: elegilo a mano.",
+                   accion="Elegí el Centro de Costos.")
 
     # Solo se agrega la linea si el tipo de comprobante quedo cargado. Sin tipo,
     # "Agregar linea" (#IMAGE3) dispara un dialogo de validacion de GeneXus que
@@ -359,9 +369,11 @@ async def cargar_factura(page, factura, avisos, centro_de_padron=False):
         await page.locator("#IMAGE3").click()
         await esperar_genexus(page)
     else:
-        avisos.append(
+        avisar(
+            avisos,
             "No se agregó la línea del detalle porque falta el tipo de "
             "comprobante.\nElegí el tipo, revisá los datos y agregá la línea "
-            "a mano."
+            "a mano.",
+            accion="Agregá la línea del detalle.",
         )
     return True

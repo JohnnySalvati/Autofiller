@@ -31,10 +31,17 @@ class Avisos(list):
     def __init__(self, *args):
         super().__init__(*args)
         self.leves = set()
+        self.acciones = {}
 
-    def leve(self, texto):
-        self.leves.add(len(self))
+    def agregar(self, texto, accion=None, leve=False):
+        if leve:
+            self.leves.add(len(self))
+        if accion:
+            self.acciones[len(self)] = accion
         self.append(texto)
+
+    def leve(self, texto, accion=None):
+        self.agregar(texto, accion, leve=True)
 
     @property
     def indices_leves(self):
@@ -44,13 +51,42 @@ class Avisos(list):
     def solo_leves(self):
         return bool(self) and len(self.leves) == len(self)
 
+    def acciones_cortas(self):
+        return [self.acciones.get(i) or resumir(t) for i, t in enumerate(self)]
 
-def avisar_leve(avisos, texto):
-    """Agrega un aviso leve. Con una lista comun se comporta como append."""
+
+def avisar(avisos, texto, accion=None):
+    """Agrega un aviso.
+
+    `texto` es el detalle completo: va a la web y al log, donde hay lugar para
+    leerlo. `accion` es el renglon que ve el operador en el cartel de la
+    pantalla: una sola linea con lo que tiene que hacer. Con una lista comun se
+    comporta como append.
+    """
     if isinstance(avisos, Avisos):
-        avisos.leve(texto)
+        avisos.agregar(texto, accion)
     else:
         avisos.append(texto)
+
+
+def avisar_leve(avisos, texto, accion=None):
+    """Agrega un aviso leve. Con una lista comun se comporta como append."""
+    if isinstance(avisos, Avisos):
+        avisos.leve(texto, accion)
+    else:
+        avisos.append(texto)
+
+
+LARGO_ACCION = 90
+
+
+def resumir(texto):
+    """Reduce un aviso a un renglon, para los que no traen `accion` propia."""
+    linea = " ".join(str(texto).splitlines()[0].split()) if str(texto).strip() else ""
+    if len(linea) > LARGO_ACCION:
+        corte = linea[:LARGO_ACCION].rsplit(" ", 1)[0]
+        linea = (corte or linea[:LARGO_ACCION]) + "…"
+    return linea
 
 # Verificado por CDP (2026-09-09): Cancelar (input name=BUTTON2, evento RETURN de
 # GeneXus) navega fuera de la pantalla. Confirmar (input name=CONFIRMAR, atajo
@@ -107,55 +143,71 @@ class Control:
 async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
     """Muestra los avisos como un cartel dentro de la propia pantalla de SISalud.
 
-    Va inyectado en la pagina, fijo arriba de todo, que es donde el operador esta
-    mirando. El titulo del comprobante va abajo y el boton Confirmar esta al pie,
-    asi que el cartel no tapa nada de lo que necesita.
+    Va inyectado en la pagina, fijo arriba a la IZQUIERDA y ocupando media
+    pantalla de ancho: SISalud muestra sus propios mensajes arriba a la derecha
+    (entre ellos el de "comprobante ya cargado"), y el cartel a todo el ancho los
+    tapaba justo cuando mas importan.
+
+    Lo que se muestra es UNA LINEA POR AVISO con lo que el operador tiene que
+    hacer (`Avisos.acciones_cortas()`). El detalle completo --por que fallo, que
+    ofrecia el combo, que parte de la descripcion se recorto-- queda en la web y
+    en el log, que es donde hay lugar y tiempo para leerlo.
 
     Con lote = {indice, total, archivo} el cartel se muestra siempre: lleva el
-    progreso de la cola, los botones "Siguiente comprobante" y "Detener", y
+    progreso de la cola, los botones "Saltar este" y "Detener la cola", y
     engancha Confirmar (click o F12) y Cancelar de SISalud para saber cual toco
     el operador. Todo avisa al agente por window.autofillerAccion.
     """
     if not avisos and not lote:
         return
-    leves = avisos.indices_leves if isinstance(avisos, Avisos) else []
+    if isinstance(avisos, Avisos):
+        leves = avisos.indices_leves
+        lineas = avisos.acciones_cortas()
+    else:
+        leves = []
+        lineas = [resumir(a) for a in avisos]
     try:
         await page.evaluate(
-            """([avisos, lote, leves]) => {
+            """([lineas, lote, leves]) => {
                 const previo = document.getElementById('autofiller-avisos');
                 if (previo) previo.remove();
-                const hayAvisos = avisos.length > 0;
+                const hayAvisos = lineas.length > 0;
                 // Amarillo cuando TODOS los avisos son leves: la carga quedo
                 // completa y solo hay algo para mirar. Rojo apenas hay uno que
                 // impide confirmar. Sin avisos, azul: es solo el progreso.
-                const soloLeves = hayAvisos && leves.length === avisos.length;
+                const soloLeves = hayAvisos && leves.length === lineas.length;
                 const fondo = !hayAvisos ? '#1d4ed8' : (soloLeves ? '#eab308' : '#b91c1c');
                 const tinta = soloLeves ? '#1c1917' : '#fff';
                 const chipFondo = soloLeves ? 'rgba(0,0,0,.14)' : 'rgba(255,255,255,.22)';
                 const caja = document.createElement('div');
                 caja.id = 'autofiller-avisos';
-                // max-height + overflow: con cuatro avisos largos el cartel llegaba a
-                // tapar media pantalla, justo la mitad de arriba, que es donde estan
-                // los campos que el operador tiene que corregir a mano.
-                caja.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
+                // width 50%: la mitad derecha queda libre para los mensajes de
+                // la propia pantalla. max-height + overflow por si un comprobante
+                // deja varios avisos juntos.
+                caja.style.cssText = 'position:fixed;top:0;left:0;width:50%;'
+                    + 'box-sizing:border-box;z-index:2147483647;'
                     + 'background:' + fondo + ';color:' + tinta + ';'
-                    + 'font:14px/1.45 Segoe UI,sans-serif;max-height:38vh;overflow:auto;'
-                    + 'padding:12px 46px 14px 18px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
+                    + 'font:14px/1.4 Segoe UI,sans-serif;max-height:38vh;overflow:auto;'
+                    + 'padding:10px 42px 12px 16px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
                 const titulo = document.createElement('div');
-                titulo.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:6px';
-                if (lote) {
-                    titulo.textContent = 'AutoFiller — comprobante ' + lote.indice + ' de '
-                        + lote.total + ': ' + lote.archivo
-                        + (hayAvisos ? ' — revisar antes de Confirmar:' : '');
-                } else {
-                    titulo.textContent = 'AutoFiller — revisar antes de Confirmar:';
-                }
+                titulo.style.cssText = 'font-weight:700;font-size:15px';
+                titulo.textContent = hayAvisos
+                    ? 'Revisá esto antes de Confirmar'
+                    : 'Comprobante cargado: revisá y confirmá';
                 caja.appendChild(titulo);
+                if (lote) {
+                    const sub = document.createElement('div');
+                    sub.style.cssText = 'font-size:12px;opacity:.85;margin-top:2px;'
+                        + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                    sub.textContent = lote.indice + ' de ' + lote.total + ': ' + lote.archivo;
+                    caja.appendChild(sub);
+                }
                 const ul = document.createElement('ul');
-                ul.style.cssText = 'margin:0;padding-left:22px';
-                avisos.forEach((a, i) => {
+                ul.style.cssText = 'margin:7px 0 0;padding-left:20px';
+                ul.hidden = !hayAvisos;
+                lineas.forEach((a, i) => {
                     const li = document.createElement('li');
-                    li.style.cssText = 'margin-bottom:5px;white-space:pre-line';
+                    li.style.cssText = 'margin-bottom:4px';
                     // En un cartel rojo con avisos de los dos tipos, el leve
                     // lleva su etiqueta: si no, se lee como uno mas que traba.
                     if (leves.includes(i) && !soloLeves) {
@@ -172,21 +224,18 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                 caja.appendChild(ul);
                 if (lote) {
                     const pie = document.createElement('div');
-                    pie.style.cssText = 'margin-top:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap';
-                    const nota = document.createElement('span');
-                    nota.textContent = 'Revisá y tocá Confirmar o Cancelar en SISalud: '
-                        + 'al terminar se carga el siguiente.';
-                    pie.appendChild(nota);
+                    pie.style.cssText = 'margin-top:8px;display:flex;gap:8px;'
+                        + 'align-items:center;flex-wrap:wrap';
                     const boton = (texto, accion) => {
                         const b = document.createElement('button');
                         b.type = 'button';
                         b.textContent = texto;
                         b.style.cssText = 'background:#fff;color:#111;border:0;border-radius:4px;'
-                            + 'padding:5px 12px;font:600 13px Segoe UI,sans-serif;cursor:pointer';
+                            + 'padding:4px 11px;font:600 13px Segoe UI,sans-serif;cursor:pointer';
                         b.onclick = () => { b.disabled = true; window.autofillerAccion(accion); };
                         return b;
                     };
-                    pie.appendChild(boton('Siguiente comprobante (saltar este)', 'saltar'));
+                    pie.appendChild(boton('Saltar este', 'saltar'));
                     pie.appendChild(boton('Detener la cola', 'detener'));
                     caja.appendChild(pie);
                     // Enganchar los botones de SISalud para saber cual toco el operador.
@@ -201,9 +250,11 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                     }, true);
                 }
                 const cerrar = document.createElement('button');
-                cerrar.style.cssText = 'position:fixed;top:8px;right:14px;background:transparent;'
-                    + 'border:0;color:' + tinta + ';font-size:22px;line-height:1;cursor:pointer;'
-                    + 'z-index:2147483647';
+                // Fijo como la caja, pero al borde de la MITAD: con la caja a
+                // media pantalla, right:14px caeria fuera del cartel.
+                cerrar.style.cssText = 'position:fixed;top:6px;left:calc(50% - 34px);'
+                    + 'background:transparent;border:0;color:' + tinta + ';font-size:22px;'
+                    + 'line-height:1;cursor:pointer;z-index:2147483647';
                 caja.appendChild(cerrar);
                 document.body.appendChild(caja);
 
@@ -216,6 +267,11 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                     document.body.dataset.autofillerPadding = document.body.style.paddingTop || '';
                 }
                 const empujar = () => {
+                    // isConnected: al sacar el cartel, el ResizeObserver todavia
+                    // dispara una vez con el nodo ya suelto (alto 0) y dejaba un
+                    // padding-top:0px inline en el body, pisando lo que la
+                    // pantalla tuviera puesto por CSS.
+                    if (!caja.isConnected) return;
                     try { document.body.style.paddingTop = caja.offsetHeight + 'px'; } catch (e) {}
                 };
 
@@ -237,7 +293,6 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                     }
                     plegado = !plegado;
                     if (hayAvisos) ul.hidden = plegado;
-                    titulo.style.marginBottom = plegado ? '0' : '6px';
                     pintarBoton();
                     empujar();
                 };
@@ -246,7 +301,7 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                 // GeneXus redibuja al volver cada postback y la altura puede cambiar.
                 if (window.ResizeObserver) new ResizeObserver(empujar).observe(caja);
             }""",
-            [avisos, lote, leves],
+            [lineas, lote, leves],
         )
     except Exception:
         # El cartel es un extra: si la pagina no permite inyectarlo, seguimos.

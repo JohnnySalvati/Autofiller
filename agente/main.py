@@ -21,12 +21,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from navegador import Navegador
-from operador import (ESTADOS, Avisos, Control, esperar_resolucion,
+from operador import (ESTADOS, Avisos, Control, avisar, esperar_resolucion,
                       mostrar_avisos_en_pantalla)
 from padron import centro_costo_del_afiliado
 from sisalud import abrir_pantalla, cargar_factura, esperar_genexus
 
-VERSION = "2.0"
+VERSION = "2.1"
 
 # De donde se sirve la web. El agente escucha en 127.0.0.1, asi que cualquier
 # pagina que el operador tenga abierta podria hablarle: por eso la lista de
@@ -171,12 +171,15 @@ async def _correr(trabajo: Trabajo):
         cargado = await cargar_factura(
             page, trabajo.factura, avisos, centro_de_padron=centro_de_padron)
     except Exception as e:
-        avisos.append(
+        avisar(
+            avisos,
             f"Falló la carga automática ({e}).\n"
-            "Cargalo a mano y confirmá, o tocá 'Siguiente comprobante' para saltarlo."
+            "Cargalo a mano y confirmá, o tocá 'Saltar este' para saltarlo.",
+            accion="No se pudo cargar: cargalo a mano, o saltalo.",
         )
     if not cargado and not avisos:
-        avisos.append("No se pudo cargar el comprobante: cargalo a mano o saltalo.")
+        avisar(avisos, "No se pudo cargar el comprobante: cargalo a mano o saltalo.",
+               accion="No se pudo cargar: cargalo a mano, o saltalo.")
 
     lote = {"indice": trabajo.indice, "total": trabajo.total, "archivo": trabajo.archivo}
     await mostrar_avisos_en_pantalla(page, avisos, lote)
