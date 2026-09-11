@@ -9,6 +9,49 @@ servidor: si la pantalla no esta a la vista, nadie revisa antes de grabar.
 import asyncio
 import time
 
+
+class Avisos(list):
+    """Los avisos del comprobante, sabiendo cuales son leves.
+
+    Un aviso LEVE es el que no impide confirmar: la carga quedo completa y el
+    operador solo tiene que mirar algo. Hoy el unico es el recorte de la
+    descripcion por el maxlength de la pantalla, que pasa en casi la mitad de
+    los comprobantes -- 27 de las 63 muestras pasan de 150 caracteres. Pintar el
+    cartel de rojo por eso hacia que el rojo dejara de significar "esto esta
+    trabado", que es justo lo que el cartel tiene que comunicar.
+
+    Todos los demas avisos son graves: piden una accion sin la cual el
+    comprobante no se puede confirmar (elegir el tipo, agregar la linea, elegir
+    el centro de costos, dar de alta el CUIT).
+
+    Hereda de list para no cambiarle la forma a Estado.avisos ni a lo que la web
+    ya sabe mostrar.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.leves = set()
+
+    def leve(self, texto):
+        self.leves.add(len(self))
+        self.append(texto)
+
+    @property
+    def indices_leves(self):
+        return sorted(self.leves)
+
+    @property
+    def solo_leves(self):
+        return bool(self) and len(self.leves) == len(self)
+
+
+def avisar_leve(avisos, texto):
+    """Agrega un aviso leve. Con una lista comun se comporta como append."""
+    if isinstance(avisos, Avisos):
+        avisos.leve(texto)
+    else:
+        avisos.append(texto)
+
 # Verificado por CDP (2026-09-09): Cancelar (input name=BUTTON2, evento RETURN de
 # GeneXus) navega fuera de la pantalla. Confirmar (input name=CONFIRMAR, atajo
 # F12) no se pudo probar sin grabar un comprobante real; se asume que al grabar
@@ -75,17 +118,28 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
     """
     if not avisos and not lote:
         return
+    leves = avisos.indices_leves if isinstance(avisos, Avisos) else []
     try:
         await page.evaluate(
-            """([avisos, lote]) => {
+            """([avisos, lote, leves]) => {
                 const previo = document.getElementById('autofiller-avisos');
                 if (previo) previo.remove();
                 const hayAvisos = avisos.length > 0;
+                // Amarillo cuando TODOS los avisos son leves: la carga quedo
+                // completa y solo hay algo para mirar. Rojo apenas hay uno que
+                // impide confirmar. Sin avisos, azul: es solo el progreso.
+                const soloLeves = hayAvisos && leves.length === avisos.length;
+                const fondo = !hayAvisos ? '#1d4ed8' : (soloLeves ? '#eab308' : '#b91c1c');
+                const tinta = soloLeves ? '#1c1917' : '#fff';
+                const chipFondo = soloLeves ? 'rgba(0,0,0,.14)' : 'rgba(255,255,255,.22)';
                 const caja = document.createElement('div');
                 caja.id = 'autofiller-avisos';
+                // max-height + overflow: con cuatro avisos largos el cartel llegaba a
+                // tapar media pantalla, justo la mitad de arriba, que es donde estan
+                // los campos que el operador tiene que corregir a mano.
                 caja.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;'
-                    + 'background:' + (hayAvisos ? '#b91c1c' : '#1d4ed8') + ';color:#fff;'
-                    + 'font:14px/1.45 Segoe UI,sans-serif;'
+                    + 'background:' + fondo + ';color:' + tinta + ';'
+                    + 'font:14px/1.45 Segoe UI,sans-serif;max-height:38vh;overflow:auto;'
                     + 'padding:12px 46px 14px 18px;box-shadow:0 2px 10px rgba(0,0,0,.45)';
                 const titulo = document.createElement('div');
                 titulo.style.cssText = 'font-weight:700;font-size:15px;margin-bottom:6px';
@@ -99,10 +153,20 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                 caja.appendChild(titulo);
                 const ul = document.createElement('ul');
                 ul.style.cssText = 'margin:0;padding-left:22px';
-                avisos.forEach(a => {
+                avisos.forEach((a, i) => {
                     const li = document.createElement('li');
                     li.style.cssText = 'margin-bottom:5px;white-space:pre-line';
-                    li.textContent = a;
+                    // En un cartel rojo con avisos de los dos tipos, el leve
+                    // lleva su etiqueta: si no, se lee como uno mas que traba.
+                    if (leves.includes(i) && !soloLeves) {
+                        const chip = document.createElement('span');
+                        chip.textContent = 'solo revisar';
+                        chip.style.cssText = 'display:inline-block;background:' + chipFondo
+                            + ';border-radius:3px;padding:1px 7px;margin-right:7px;'
+                            + 'font-size:12px;font-weight:600;white-space:nowrap';
+                        li.appendChild(chip);
+                    }
+                    li.appendChild(document.createTextNode(a));
                     ul.appendChild(li);
                 });
                 caja.appendChild(ul);
@@ -137,17 +201,52 @@ async def mostrar_avisos_en_pantalla(page, avisos, lote=None):
                     }, true);
                 }
                 const cerrar = document.createElement('button');
-                cerrar.textContent = '×';
-                cerrar.title = lote ? 'Ocultar avisos' : 'Cerrar aviso';
-                cerrar.style.cssText = 'position:absolute;top:8px;right:14px;background:transparent;'
-                    + 'border:0;color:#fff;font-size:24px;line-height:1;cursor:pointer';
-                // Con la cola andando solo se ocultan los avisos: el progreso y
-                // los botones tienen que seguir a la vista.
-                cerrar.onclick = () => lote ? ul.remove() : caja.remove();
+                cerrar.style.cssText = 'position:fixed;top:8px;right:14px;background:transparent;'
+                    + 'border:0;color:' + tinta + ';font-size:22px;line-height:1;cursor:pointer;'
+                    + 'z-index:2147483647';
                 caja.appendChild(cerrar);
                 document.body.appendChild(caja);
+
+                // El cartel es position:fixed, o sea que flota por ENCIMA de la
+                // pantalla de SISalud. Empujando el body hacia abajo la altura
+                // exacta del cartel, deja de tapar nada: el formulario entero
+                // sigue accesible con el cartel a la vista.
+                const previoPadding = document.body.dataset.autofillerPadding;
+                if (previoPadding === undefined) {
+                    document.body.dataset.autofillerPadding = document.body.style.paddingTop || '';
+                }
+                const empujar = () => {
+                    try { document.body.style.paddingTop = caja.offsetHeight + 'px'; } catch (e) {}
+                };
+
+                // El boton PLIEGA los avisos, no los borra. Antes los removia, y
+                // eso dejaba al operador sin las indicaciones que necesita
+                // justamente para corregir a mano lo que el cartel le pide.
+                let plegado = false;
+                const pintarBoton = () => {
+                    cerrar.textContent = lote ? (plegado ? '▾' : '▴') : '×';
+                    cerrar.title = lote
+                        ? (plegado ? 'Mostrar los avisos' : 'Plegar los avisos')
+                        : 'Cerrar aviso';
+                };
+                cerrar.onclick = () => {
+                    if (!lote) {
+                        document.body.style.paddingTop = document.body.dataset.autofillerPadding || '';
+                        caja.remove();
+                        return;
+                    }
+                    plegado = !plegado;
+                    if (hayAvisos) ul.hidden = plegado;
+                    titulo.style.marginBottom = plegado ? '0' : '6px';
+                    pintarBoton();
+                    empujar();
+                };
+                pintarBoton();
+                empujar();
+                // GeneXus redibuja al volver cada postback y la altura puede cambiar.
+                if (window.ResizeObserver) new ResizeObserver(empujar).observe(caja);
             }""",
-            [avisos, lote],
+            [avisos, lote, leves],
         )
     except Exception:
         # El cartel es un extra: si la pagina no permite inyectarlo, seguimos.

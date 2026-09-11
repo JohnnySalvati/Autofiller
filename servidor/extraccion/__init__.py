@@ -19,6 +19,7 @@ import os
 from datetime import date
 
 from . import ocr
+from .afiliado import identificacion
 from .centro_costo import centro_costo_de_domicilio, provincia_de_domicilio
 from .modelo import Factura, Resultado
 from .qr import campos_desde_qr, leer_qr
@@ -228,6 +229,13 @@ def extraer(nombre, contenido):
     except Exception as e:
         resultado.error = f"No se pudo leer el comprobante: {e}"
         return resultado
+
+    # El DNI y el numero de afiliado salen del detalle facturado, y no se
+    # cargan en la pantalla: son para que el agente le pregunte al padron de
+    # SISalud la seccional del afiliado, que es el Centro de Costos real. El de
+    # aca sigue siendo el deducido del domicilio, que es el que vale si el
+    # padron no contesta.
+    datos["dni"], datos["nro_afiliado"] = identificacion(datos.get("descripcion"))
 
     resultado.factura = Factura(**datos)
     resultado.avisos = avisos

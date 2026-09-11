@@ -21,7 +21,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from navegador import Navegador
-from operador import ESTADOS, Control, esperar_resolucion, mostrar_avisos_en_pantalla
+from operador import (ESTADOS, Avisos, Control, esperar_resolucion,
+                      mostrar_avisos_en_pantalla)
+from padron import centro_costo_del_afiliado
 from sisalud import abrir_pantalla, cargar_factura, esperar_genexus
 
 VERSION = "2.0"
@@ -69,6 +71,12 @@ class Factura(BaseModel):
     cae: Optional[str] = None
     descripcion: str = ""
     importe: Optional[str] = None
+
+    # Identificacion del afiliado, sacada del detalle facturado. No se carga en
+    # la pantalla: el agente la usa para preguntarle al padron de SISalud cual es
+    # la seccional del afiliado, que es el Centro de Costos de verdad.
+    dni: Optional[str] = None
+    nro_afiliado: Optional[str] = None
     domicilio: Optional[str] = None
     provincia: Optional[str] = None
     centro_costo: Optional[str] = None
@@ -126,7 +134,9 @@ async def _correr(trabajo: Trabajo):
     global estado
 
     control.nuevo_comprobante()
-    avisos: List[str] = []
+    # Avisos y no una lista comun: recuerda cuales avisos son leves, que es lo
+    # que decide de que color se pinta el cartel (ver operador.Avisos).
+    avisos = Avisos()
     cargado = False
 
     # Sin pestaña no hay nada que esperar: es el unico fallo que termina el
@@ -143,7 +153,23 @@ async def _correr(trabajo: Trabajo):
 
     try:
         await abrir_pantalla(page, credenciales.usuario, credenciales.clave)
-        cargado = await cargar_factura(page, trabajo.factura, avisos)
+
+        # El Centro de Costos que trae el comprobante esta deducido del domicilio
+        # del prestador, que es una aproximacion: falla cuando el prestador esta
+        # lejos del afiliado. Si el detalle facturado trae el DNI, el padron de
+        # SISalud da la seccional exacta. Si el padron no contesta, se sigue con
+        # la aproximacion, que es lo que habia antes: nunca se empeora.
+        centro_de_padron = False
+        if trabajo.factura.dni or trabajo.factura.nro_afiliado:
+            centro = await centro_costo_del_afiliado(page, trabajo.factura, avisos)
+            if centro:
+                trabajo.factura.centro_costo, trabajo.factura.centro_costo_nombre = centro
+                centro_de_padron = True
+            # La consulta dejo la pestaña en el padron: hay que volver.
+            await abrir_pantalla(page, credenciales.usuario, credenciales.clave)
+
+        cargado = await cargar_factura(
+            page, trabajo.factura, avisos, centro_de_padron=centro_de_padron)
     except Exception as e:
         avisos.append(
             f"Falló la carga automática ({e}).\n"

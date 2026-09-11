@@ -22,6 +22,8 @@ import re
 import time
 import unicodedata
 
+from operador import avisar_leve
+
 URL_CARGA = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacomprobantescompra?10,0"
 
 SIN_MASCARA = "() => !document.querySelector('div.gx-mask')"
@@ -120,6 +122,20 @@ async def elegir_tipo_comprobante(page, valor, avisos):
     combo = page.locator("#vTIPOCOMPROBANTECODIGO")
     for _ in range(3):
         await esperar_genexus(page)
+
+        # Mirar las opciones ANTES de intentar seleccionar. Antes se iba derecho
+        # al select_option con timeout de 4 s, asi que un prestador que
+        # realmente no ofrece este tipo -- CONTI, ARCE y varios mas -- se comia
+        # 12 s de reloj para terminar avisando lo mismo. Se sigue reintentando
+        # tres veces porque el combo parpadea mientras GeneXus lo repuebla, pero
+        # ahora cada intento fallido cuesta milisegundos en vez de 4 s.
+        valores = await page.evaluate(
+            "() => { const s = document.getElementById('vTIPOCOMPROBANTECODIGO');"
+            " return s ? Array.from(s.options).map(o => o.value) : []; }")
+        if valor not in valores:
+            await page.wait_for_timeout(300)
+            continue
+
         try:
             await combo.click()
             await combo.select_option(value=valor, timeout=4000)
@@ -145,14 +161,24 @@ async def llenar(page, campo_id, dato):
     GeneXus lo recibe junto al agregar la linea (#IMAGE3). GeneXus solo aplica
     su mascara (padea ceros: 5 -> 0005) sin necesidad de blur.
 
-    Timeout corto y tolerante: si el campo esta oculto (p. ej. quedan campos
-    invisibles cuando no se pudo fijar el tipo de comprobante), no se cuelga
-    esperandolo; revisar_cabecera() detecta despues lo que quedo sin cargar.
+    Si el campo no esta a la vista no se intenta llenarlo. fill() espera a que el
+    elemento sea visible y editable, asi que con un campo oculto se come el
+    timeout entero para terminar fallando igual: eran 8 s tirados por campo. Y no
+    es un caso raro -- SISalud tiene en el DOM campos de la cabecera que esta
+    pantalla no muestra nunca, como la fecha de devengamiento.
+
+    La espera corta (1 s) es por si GeneXus todavia lo esta dibujando; lo que no
+    aparecio para entonces, con la pantalla ya en reposo, no va a aparecer.
     """
     if not dato:
         return False
+    campo = page.locator(f"#{campo_id}")
     try:
-        await page.locator(f"#{campo_id}").fill(dato, timeout=8000)
+        await campo.wait_for(state="visible", timeout=1000)
+    except Exception:
+        return False
+    try:
+        await campo.fill(dato, timeout=4000)
         return True
     except Exception:
         return False
@@ -208,7 +234,11 @@ async def revisar_cabecera(page, avisos):
     faltantes = []
     for campo_id, etiqueta in CAMPOS_CABECERA.items():
         campo = page.locator(f"#{campo_id}")
-        if await campo.count() == 0:
+        # No alcanza con que no exista: SISalud deja en el DOM campos que la
+        # pantalla no muestra (la fecha de devengamiento, por ejemplo). Estaban
+        # vacios siempre, asi que se avisaban como faltantes en todos los
+        # comprobantes, mandando al operador a completar un campo que no ve.
+        if await campo.count() == 0 or not await campo.is_visible():
             continue
         valor = await campo.input_value()
         if not valor.strip() or set(valor) <= set(" /0"):
@@ -259,7 +289,7 @@ async def abrir_pantalla(page, usuario, contrasenia):
     await esperar_genexus(page)
 
 
-async def cargar_factura(page, factura, avisos):
+async def cargar_factura(page, factura, avisos, centro_de_padron=False):
     """Carga la factura en la pantalla ya abierta. No confirma: eso lo hace el
     operador. Devuelve False si no se pudo ni elegir el prestador.
     """
@@ -283,7 +313,11 @@ async def cargar_factura(page, factura, avisos):
     descripcion = " ".join((factura.descripcion or "").split())
     limite = await page.locator("#vEXENTOCOMPROBANTEDETALLEDESCRIPCION").get_attribute("maxlength")
     if limite and len(descripcion) > int(limite):
-        avisos.append(
+        # LEVE: la descripcion SI se cargo, solo hay que mirar que se perdio.
+        # No impide confirmar, a diferencia de todos los demas avisos, y pasa
+        # en casi la mitad de los comprobantes.
+        avisar_leve(
+            avisos,
             f"La descripción tiene {len(descripcion)} caracteres y en la pantalla "
             f"entran {limite}.\nSe cargó recortada, revisala antes de confirmar:\n"
             f"...{descripcion[int(limite):]}"
@@ -293,8 +327,15 @@ async def cargar_factura(page, factura, avisos):
 
     # Centro de costos: si no hay homonimo, o la provincia del comprobante no
     # coincide con la que SISalud tiene para el prestador, se deja sin tocar.
+    #
+    # El control cruzado por provincia existe para atajar los errores de la
+    # APROXIMACION por domicilio del prestador. Cuando el centro de costos salio
+    # del padron de afiliados no corresponde aplicarlo: ahi el dato es la
+    # seccional real del afiliado, y justamente los casos que importan son
+    # aquellos en que el prestador esta en otra provincia que su afiliado
+    # (ANTOLA factura desde Jujuy y su afiliado es de Mina Aguilar).
     centro_costo = factura.centro_costo
-    provincia_sisalud = await provincia_en_sisalud(page)
+    provincia_sisalud = None if centro_de_padron else await provincia_en_sisalud(page)
     if centro_costo and provincia_sisalud and provincia_sisalud != factura.provincia:
         avisos.append(
             f"La provincia del comprobante ({factura.provincia}) no coincide con "

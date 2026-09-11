@@ -231,21 +231,49 @@ Detalles resueltos:
 
 Los 4 dudosos cargan la provincia y el operador corrige si hace falta: ANTOLA y VALDIVIEZO (Jujuy, podría ser Mina Aguilar), BENITEZ (San Martín) y SANCHEZ (Los Polvorines), ambos Buenos Aires.
 
-**RESUELTO EN PRINCIPIO (2026-09-10): el padrón de SISalud da el dato exacto.**
-`extraccion/afiliado.py` saca el DNI y el número de afiliado del detalle facturado
-(**63/63** de las muestras traen al menos uno: 61 el DNI, 20 el número). Con ese DNI,
-la pantalla `servlet/wwafiliado` devuelve la **Delegación** del afiliado, y las 24
-delegaciones que son centro de costos coinciden por nombre exacto con el combo. Ver
-`pruebas/delegaciones.md` para la secuencia (ojo: hay que setear `Orden Por` ANTES,
-o los filtros se ignoran en silencio) y la tabla completa.
+**RESUELTO (2026-09-10): el centro de costos sale del padrón de SISalud.**
 
-Verificado contra los cuatro casos de centro de costos confirmado: **4 de 4**,
-incluido ANTOLA, que es el que la aproximación por domicilio erraba por 250 km.
+Cadena completa, verificada de punta a punta:
 
-Falta decidir: las 25 delegaciones que no tienen centro de costos propio (agrupan a
-OLAVARRIA y otras, hay que confirmarlas como se confirmaron los alias de localidad),
-qué hacer si el DNI no está en el padrón, y que la consulta la haga el **agente**,
-que es quien tiene Chrome y sesión de SISalud.
+```
+detalle facturado -> DNI            (extraccion/afiliado.py, 63/63 de las muestras)
+DNI -> Delegación                   (agente/padron.py, pantalla servlet/wwafiliado)
+Delegación -> centro de costos      (24 homónimas + 21 deducidas, agente/padron.py)
+```
+
+Verificado contra los cuatro casos de centro de costos confirmado por el
+usuario: **4 de 4**, incluido ANTOLA, donde la aproximación por domicilio erraba
+por 250 km (daba JUJUY 73, el padrón dice MINA AGUILAR 61).
+
+Corre en el **agente**, no en el servidor: es una pantalla más de SISalud y el
+único que tiene Chrome con la sesión del operador es el agente. La consulta va
+antes de abrir la Carga Rápida, y después se vuelve a ella.
+
+**La trampa de `wwafiliado`**: los campos de filtro están en el DOM desde que
+carga la página, pero el servidor los ignora hasta que se elige `Orden Por`
+(`#vAFILIADOORDENPOR`). Llenar el documento sin eso devuelve cero filas siempre,
+sin ningún mensaje, y se ve idéntico a "ese afiliado no existe".
+
+**Degradado (decisión del usuario)**: si el padrón no contesta por lo que sea
+—sin DNI, DNI ausente, la pantalla cambió, más de una delegación, delegación sin
+centro de costos— se vuelve a la aproximación por domicilio, que ya funcionaba.
+La consulta solo puede mejorar el resultado, nunca empeorarlo. Cada caso deja su
+aviso. Las nueve ramas están probadas con un `page` falso.
+
+Cuando el centro de costos viene del padrón **no se aplica el control cruzado
+por provincia** de `cargar_factura`: ese control existía para atajar errores de
+la aproximación, y justamente los casos que importan son aquellos en que el
+prestador está en otra provincia que su afiliado.
+
+**Las 21 deducidas están sin confirmar por el operador.** Criterio del usuario:
+"todo lo que se pueda deducir es válido; si el operador lo corrige, se cambia".
+Las cinco de la zona de Olavarría (LOMA NEGRA, CALERA AVELLANEDA, CAL Y PIEDRA,
+SIERRAS BAYAS, CERRO SOTUYO) son las más apoyadas: comparten domicilio con
+OLAVARRIA. Tabla completa con el fundamento de cada una en
+`pruebas/delegaciones.md`.
+
+CORRIENTES, POSADAS, ROSARIO y LA RIOJA quedan sin centro de costos a propósito:
+sus provincias no tienen opción en el combo.
 
 Sin resolver: el caso de fondo es que el prestador esté lejos de la seccional del afiliado. Ejemplo real confirmado: ANTOLA, prestadora en Perico (Jujuy) y centro de costos Mina Aguilar, a ~250 km. La única forma de resolverlo sería leer la seccional del afiliado en el padrón de SISalud a partir del DNI o número de afiliado que aparece en la descripción del detalle.
 

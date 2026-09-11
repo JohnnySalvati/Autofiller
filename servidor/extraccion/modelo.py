@@ -79,6 +79,12 @@ class Factura(BaseModel):
     descripcion: str = ""
     importe: Optional[str] = None
 
+    # Identificacion del afiliado, sacada del detalle facturado. No se carga en
+    # la pantalla: el agente la usa para preguntarle al padron de SISalud cual es
+    # la seccional del afiliado, que es el Centro de Costos de verdad.
+    dni: Optional[str] = None
+    nro_afiliado: Optional[str] = None
+
     # Derivados del domicilio comercial del emisor.
     domicilio: Optional[str] = None
     provincia: Optional[str] = None
