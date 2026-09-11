@@ -20,3 +20,6 @@ agente/build/
 agente/dist/
 agente/AutoFillerAgente.spec
 agente/AutoFillerAgente.zip
+
+# Configuracion local de Claude Code (permisos de esta PC): no va al repo.
+.claude/
