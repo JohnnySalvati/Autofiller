@@ -215,7 +215,10 @@ desplegada. Desde 2026-09-10 **ya no trae credenciales hardcodeadas**: los campo
 Usuario y Contraseña arrancan vacíos y `credenciales()` frena el procesamiento con
 un `messagebox` si falta alguno, en vez de intentar el login en blanco. La clave
 que estaba en el código sigue estando en el historial de git y dentro de
-`dist/AutoFiller.exe`: hay que **rotarla** y recompilar el `.exe`.
+`dist/AutoFiller.exe`, pero **ya fue rotada** (2026-09-11, confirmado por el
+usuario): la que quedó expuesta no sirve más. Consecuencia: el `.exe` ya
+distribuido, el viejo, tiene la clave muerta adentro — hay que **recompilarlo**
+para que el operador pueda entrar.
 
 
 ## Comportamiento de la pantalla frente a la automatización (verificado por CDP, 2026-09-09)
@@ -252,8 +255,10 @@ Resueltos por la app web (los demás siguen presentes en `AutoFiller.py`, que se
 mantiene):
 
 - **Credenciales hardcodeadas**: la web las pide y las manda solo al agente local.
-  El escritorio también las pide desde 2026-09-10 (queda pendiente rotar la clave
-  vieja, que está en el historial de git y en el `.exe` ya distribuido).
+  El escritorio también las pide desde 2026-09-10, y la clave que había quedado
+  expuesta **se rotó el 2026-09-11**: la del historial de git y la del `.exe` ya
+  distribuido no sirven más. Queda recompilar ese `.exe`, que hoy lleva adentro
+  la clave muerta.
 - **Errores invisibles**: todo vuelve en `Resultado.error` / `avisos` y se ve en la
   cola. Un PDF sin `Hasta:` o sin `Importe Total:` ya no revienta.
 - **Dependencias del entorno**: la ruta de Chrome se busca en varias ubicaciones y se
