@@ -13,6 +13,7 @@ Arranque:  python -m uvicorn main:app --host 127.0.0.1 --port 8765
 """
 
 import asyncio
+import base64
 import os
 from typing import List, Optional
 
@@ -24,7 +25,8 @@ from navegador import Navegador
 from operador import (ESTADOS, Avisos, Control, avisar, esperar_resolucion,
                       mostrar_avisos_en_pantalla)
 from padron import centro_costo_del_afiliado
-from sisalud import abrir_pantalla, cargar_factura, esperar_genexus
+from sisalud import (abrir_pantalla, adjuntar_comprobante, cargar_factura,
+                     esperar_genexus)
 
 VERSION = "2.1"
 
@@ -91,6 +93,14 @@ class Credenciales(BaseModel):
 class Trabajo(BaseModel):
     factura: Factura
     archivo: str = ""
+
+    # El comprobante mismo, en base64, para adjuntarlo en la pantalla. Lo manda
+    # la web desde el archivo que ya tiene en memoria: no vuelve a pedirselo al
+    # servidor y nunca sale de esta PC. Va adentro del JSON y no como multipart
+    # para no sumarle al agente una dependencia (python-multipart) ni un segundo
+    # endpoint; un comprobante pesa de unos KB a unos pocos MB.
+    contenido: str = ""
+
     indice: int = 1
     total: int = 1
 
@@ -127,6 +137,16 @@ navegador = Navegador(control)
 credenciales: Optional[Credenciales] = None
 estado = Estado(fase="libre")
 tarea: Optional[asyncio.Task] = None
+
+
+def _contenido(trabajo: Trabajo) -> bytes:
+    """El archivo del comprobante, o vacio si no vino o vino roto."""
+    if not trabajo.contenido:
+        return b""
+    try:
+        return base64.b64decode(trabajo.contenido)
+    except Exception:
+        return b""
 
 
 async def _correr(trabajo: Trabajo):
@@ -167,6 +187,12 @@ async def _correr(trabajo: Trabajo):
                 centro_de_padron = True
             # La consulta dejo la pestaña en el padron: hay que volver.
             await abrir_pantalla(page, credenciales.usuario, credenciales.clave)
+
+        # El adjunto va ANTES de la cabecera: sobrevive entero a los postbacks
+        # de la carga (verificado el 2026-09-11) y asi, si algo sale mal con los
+        # popups, todavia no hay nada cargado que se pueda perder.
+        await adjuntar_comprobante(
+            page, trabajo.archivo, _contenido(trabajo), avisos)
 
         cargado = await cargar_factura(
             page, trabajo.factura, avisos, centro_de_padron=centro_de_padron)

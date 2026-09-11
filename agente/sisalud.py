@@ -30,6 +30,35 @@ SIN_MASCARA = "() => !document.querySelector('div.gx-mask')"
 
 SELECTOR_PROMPT = "iframe[title=\"Promptentidad\\?34\\,\\,0\\,10\\,c\\,\\,gxPopupLevel\\%3D0\\%3B\"]"
 
+# Los dos popups del adjunto, encadenados: "Adjuntar" abre el alta de archivos
+# (servlet temporalarchivos) y "Agregar Archivo" abre adentro el control de
+# subida (servlet archivotemporalsubir). Se los busca por el servlet y no por el
+# titulo del iframe, que lleva pegados los parametros de la llamada y cambia.
+SELECTOR_ALTA_ARCHIVO = "iframe[src*='temporalarchivos']"
+SELECTOR_SUBIR_ARCHIVO = "iframe[src*='archivotemporalsubir']"
+
+# Unica opcion del combo "Tipo de archivo" de esa pantalla.
+TIPO_ARCHIVO_COMPROBANTE = "1"
+
+# Lo que va en la Descripcion del adjunto. Lo definio el operador.
+DESCRIPCION_ADJUNTO = "FACTURA"
+
+TIPOS_MIME = {
+    "pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+    "png": "image/png", "heic": "image/heic", "heif": "image/heif",
+    "webp": "image/webp", "tif": "image/tiff", "tiff": "image/tiff",
+}
+
+# Cierra los popups que hayan quedado abiertos. Sin esto un adjunto a medio
+# camino deja puesta la mascara del popup y la pantalla queda trabada: el
+# operador no podria ni confirmar ni cancelar lo que ya estaba cargado.
+CERRAR_POPUPS = """() => {
+  let n = 0;
+  while (gx.popup.currentPopup && n < 5) { gx.popup.currentPopup.close(); n++; }
+  return n;
+}"""
+
+
 CAMPOS_CABECERA = {
     "vTIPOCOMPROBANTECODIGO": "Tipo de comprobante",
     "vCOMPROBANTEPREFIJO": "Punto de venta",
@@ -377,3 +406,136 @@ async def cargar_factura(page, factura, avisos, centro_de_padron=False):
             accion="Agregá la línea del detalle.",
         )
     return True
+
+
+async def limpiar_adjuntos(page, alta, avisos):
+    """Borra los adjuntos que hayan quedado de un comprobante anterior.
+
+    Los archivos temporales viven en la sesion y NO se limpian al recargar la
+    pantalla (verificado el 2026-09-11): si el comprobante anterior se cancelo o
+    se salto, sus adjuntos siguen ahi y se irian pegados al siguiente, que es
+    cargar en SISalud un comprobante con el PDF de otro. El unico caso normal es
+    que la lista este vacia, asi que lo que se encuentre se borra y se avisa.
+    """
+    # tr:has(td) y no tr a secas: la tabla del grid tiene una fila de titulos
+    # que tambien cae adentro del tbody, y contarla daria una fila de mas
+    # siempre -- incluso con la lista vacia.
+    filas = alta.locator("#GridarchivosContainerTbl tbody tr:has(td)")
+    borrados = 0
+    while await filas.count() and borrados < 10:
+        quedaban = await filas.count()
+        await alta.locator("input[name^=vELIMINARARCHIVO]").first.click()
+        # Se espera a que la fila se vaya del popup y no a esperar_genexus: el
+        # postback es del iframe, y la mascara que deja en la pantalla de atras
+        # tarda en irse lo que dura el timeout entero (20 s por adjunto).
+        for _ in range(40):
+            await page.wait_for_timeout(200)
+            if await filas.count() < quedaban:
+                break
+        borrados += 1
+
+    if borrados:
+        avisar_leve(
+            avisos,
+            f"La pantalla tenía {borrados} archivo(s) adjunto(s) de antes y se "
+            "quitaron, para que no se mezclen con este comprobante.",
+            accion=f"Se quitaron {borrados} adjunto(s) que habían quedado.",
+        )
+
+
+async def adjuntar_comprobante(page, nombre, contenido, avisos):
+    """Sube el archivo del comprobante al bloque Archivos de la pantalla.
+
+    Son dos popups encadenados, verificados por CDP contra la pantalla real el
+    2026-09-11:
+
+    1. "Adjuntar" (input[name=BUTTON5], evento E'ADJUNTARARCHIVO') abre el alta
+       de archivos: el combo Tipo, la Descripcion y "Agregar Archivo".
+    2. "Agregar Archivo" (#BTNAGREGAR) NO abre el dialogo de Windows: valida
+       primero la descripcion -- vacia contesta "Debe ingresar una descripcion" y
+       no pasa de ahi -- y recien despues abre el segundo popup, que trae un
+       control de subida de jQuery (input[type=file] de verdad). Por eso el
+       archivo entra con set_input_files y sin tocar el disco: se le pasa el
+       contenido que mando la web.
+    3. La subida arranca sola al soltar el archivo y el popup de subida se
+       cierra solo cuando termina. La senal de que termino es la fila nueva en
+       la grilla del alta.
+    4. "Salir" (input[name=BTNCANCEL]) cierra el alta y la fila aparece en la
+       grilla Gridarchivocomprobante de la pantalla.
+
+    Devuelve True si la fila quedo en la pantalla. Cualquier fallo se avisa y
+    cierra los popups: el comprobante ya cargado tiene que quedar confirmable,
+    aunque el adjunto haya que ponerlo a mano.
+    """
+    if not contenido:
+        avisar(
+            avisos,
+            "No llegó el archivo del comprobante, así que no se adjuntó.\n"
+            "Adjuntalo a mano antes de confirmar.",
+            accion="Adjuntá el comprobante a mano.",
+        )
+        return False
+
+    extension = nombre.rsplit(".", 1)[-1].lower() if "." in nombre else ""
+    archivo = {
+        "name": nombre or "comprobante",
+        "mimeType": TIPOS_MIME.get(extension, "application/octet-stream"),
+        "buffer": contenido,
+    }
+
+    try:
+        await esperar_genexus(page)
+        await page.locator("input[name=BUTTON5]").click()
+
+        alta = page.locator(SELECTOR_ALTA_ARCHIVO).content_frame
+        descripcion = alta.locator("#vARCHIVOTEMPORALDESCRIPCION")
+        await descripcion.wait_for(state="visible", timeout=15000)
+
+        # El combo trae "Comprobante" ya elegido y es su unica opcion. Se lo
+        # toca solo si hiciera falta: seleccionar dispara el evento de GeneXus.
+        tipo = alta.locator("#vARCHIVOTEMPORALTIPO")
+        if await tipo.input_value() != TIPO_ARCHIVO_COMPROBANTE:
+            await tipo.select_option(value=TIPO_ARCHIVO_COMPROBANTE, timeout=4000)
+
+        await limpiar_adjuntos(page, alta, avisos)
+
+        await descripcion.fill(DESCRIPCION_ADJUNTO)
+        await alta.locator("#BTNAGREGAR").click()
+
+        entrada = page.locator(SELECTOR_SUBIR_ARCHIVO).content_frame.locator(
+            "#fileuploadUPLOADIFYContainer")
+        await entrada.wait_for(state="attached", timeout=15000)
+        await entrada.set_input_files(files=[archivo], timeout=60000)
+
+        # Hasta 60 s: una foto de celular por una conexion lenta tarda.
+        await alta.locator(
+            "#GridarchivosContainerTbl tbody tr:has(td)").first.wait_for(
+                state="visible", timeout=60000)
+
+        await alta.locator("input[name=BTNCANCEL]").click()
+        await esperar_genexus(page)
+
+        filas = await page.locator(
+            "#GridarchivocomprobanteContainerTbl tbody tr:has(td)").count()
+        if filas:
+            return True
+        avisar(
+            avisos,
+            "El archivo se subió pero no quedó en la lista de Archivos de la "
+            "pantalla.\nAdjuntalo a mano antes de confirmar.",
+            accion="Adjuntá el comprobante a mano.",
+        )
+    except Exception as e:
+        avisar(
+            avisos,
+            f"No se pudo adjuntar el comprobante ({e}).\n"
+            "Adjuntalo a mano con el botón Adjuntar antes de confirmar.",
+            accion="Adjuntá el comprobante a mano.",
+        )
+
+    try:
+        await page.evaluate(CERRAR_POPUPS)
+        await esperar_genexus(page)
+    except Exception:
+        pass
+    return False

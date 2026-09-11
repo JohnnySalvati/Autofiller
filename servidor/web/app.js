@@ -177,6 +177,10 @@ async function agregarArchivos(archivos) {
   const nuevos = Array.from(archivos).map((archivo) => ({
     id: siguienteId++,
     archivo: archivo.name,
+    // El archivo en sí queda guardado: además de leerlo, el agente lo adjunta
+    // en la pantalla de SISalud, y para eso hay que volver a mandarlo —esta vez
+    // a 127.0.0.1, no al servidor.
+    contenido: archivo,
     estado: "leyendo",
     factura: null,
     avisos: [],
@@ -224,6 +228,23 @@ async function leerComprobante(item, archivo) {
   }
 
   dibujarCola();
+}
+
+/** El archivo en base64, para mandárselo al agente adentro del JSON.
+ *
+ * De a pedazos y no con un solo String.fromCharCode(...bytes): el spread de un
+ * array de varios millones de elementos —una foto de celular— revienta la pila
+ * del navegador.
+ */
+async function aBase64(archivo) {
+  if (!archivo) return "";
+  const bytes = new Uint8Array(await archivo.arrayBuffer());
+  const TROZO = 0x8000;
+  let binario = "";
+  for (let i = 0; i < bytes.length; i += TROZO) {
+    binario += String.fromCharCode.apply(null, bytes.subarray(i, i + TROZO));
+  }
+  return btoa(binario);
 }
 
 /* -- Dibujo de la cola ----------------------------------------------------- */
@@ -470,6 +491,7 @@ async function cargarCola() {
         body: JSON.stringify({
           factura: item.factura,
           archivo: item.archivo,
+          contenido: await aBase64(item.contenido),
           indice: i + 1,
           total,
         }),

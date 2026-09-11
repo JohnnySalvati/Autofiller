@@ -107,7 +107,10 @@ del escritorio —el ícono de la empresa, no el del producto—, que ya no est�
 Es lo único que toca SISalud, y corre en la PC del operador.
 
 - `sisalud.py`: **portado tal cual del escritorio**, con los tres hallazgos de la
-  sección siguiente intactos (máscara, orden de carga, `fill` sin blur).
+  sección siguiente intactos (máscara, orden de carga, `fill` sin blur). Lo único
+  que no viene del escritorio es `adjuntar_comprobante()` (2026-09-11): sube el
+  PDF o la foto al bloque **Archivos** de la pantalla, con la descripción
+  `FACTURA` (ver "El adjunto", abajo).
 - `operador.py`: el cartel inyectado en la pantalla, `ControlLote` (acá `Control`) y
   `esperar_resolucion`. Sin cambios de lógica; el botón dice "Detener la cola".
   El cartel ocupa la **mitad izquierda** (`width:50%`, 2026-09-11): SISalud saca sus
@@ -132,6 +135,12 @@ Es lo único que toca SISalud, y corre en la PC del operador.
 - `main.py`: `POST /api/sesion` (credenciales, quedan en memoria), `POST /api/trabajo`
   (arranca uno y vuelve enseguida), `GET /api/trabajo` (fase: `cargando` → `esperando`
   → `terminado`), `POST /api/accion` (`saltar`/`detener`), `POST /api/listo`.
+  `Trabajo.contenido` es el comprobante entero en **base64**, que la web manda
+  junto con los campos para que el agente pueda adjuntarlo. Va adentro del JSON y
+  no como multipart a propósito: le ahorra al agente la dependencia
+  `python-multipart` y un segundo endpoint, y un comprobante pesa de unos KB a
+  unos pocos MB. El archivo no vuelve a pasar por el servidor: la web ya lo tiene
+  en memoria y lo manda a `127.0.0.1`.
 - `arrancar.py`: el entrypoint del `.exe`. Importa `app` de verdad (adentro de
   PyInstaller no hay `main.py` que importar por texto), corre uvicorn **en un hilo**
   y deja el hilo principal para la bandeja, que es donde tiene que vivir el bucle de
@@ -200,6 +209,8 @@ descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.e
   un contador contra el `maxlength=150` de la pantalla, así que el recorte se ve
   antes de cargar y no después.
 - Soporta fotos (requerimiento 2).
+- **Adjunta el comprobante** en la pantalla (requerimiento 4). El escritorio no lo
+  hace: ahí el operador lo adjunta a mano.
 - Las credenciales salieron del código: se piden en la web y van solo al agente.
 - Los errores son visibles: el escritorio compilaba `--noconsole` y el operador solo
   veía "Factura inválida". El agente también se compila sin consola, pero todo lo que
@@ -233,6 +244,39 @@ La pantalla es GeneXus y hostil a la automatización. Hallazgos firmes:
 - **Cancelar y Confirmar (verificado por CDP, 2026-09-09)**: los botones viven en `#TBL_BOTONES`, que está `display:none` con el formulario vacío y aparece con el comprobante cargado. **Cancelar** (`input[name=BUTTON2]`, evento GeneXus `E'RETURN'`) hace un POST y después **navega fuera de la pantalla** (vuelve atrás en el historial: en la prueba, a `about:blank`). **Confirmar** (`input[name=CONFIRMAR]`, evento `E'CONFIRMAR'`, atajo F12) **no se probó** porque graba un comprobante real y no hay entorno de prueba; se asume que al grabar navega o vuelve al formulario vacío (ambos casos los cubre `COMPROBANTE_EN_PANTALLA`). Confirmar en un lote real es la verificación pendiente.
 - **Navegación (aplicado)**: tras el login, `main()` va directo a la pantalla con `page.goto(url)` en vez de clickear el menú `Prestadores` → celda `Carga Rapida Comprobantes` (esos clicks a veces no avanzaban → el operador tenía que darlos a mano). El login se hace solo si aparece la caja de usuario (la sesión puede seguir abierta de una corrida anterior).
 - **Ceros a la izquierda**: los campos numéricos esperan el ancho completo del `maxlength` (`0005`, no `5`); un valor corto hace que GeneXus descarte la cabecera. El `extract_information` hace `lstrip('0')`, así que hay que re-padear al cargar.
+- **El adjunto son tres popups encadenados** (verificado por CDP, 2026-09-11).
+  `input[name=BUTTON5]` "Adjuntar" (evento `E'ADJUNTARARCHIVO'`) abre el servlet
+  `temporalarchivos` ("Alta de archivos") en un iframe; ahí están el combo
+  `#vARCHIVOTEMPORALTIPO` (una sola opción, `1` = Comprobante), el textarea
+  `#vARCHIVOTEMPORALDESCRIPCION` (`maxlength` 250, lo pasa a mayúsculas al salir)
+  y `#BTNAGREGAR` "Agregar Archivo". `#BTNAGREGAR` **valida la descripción antes
+  que nada**: si está vacía contesta "Debe ingresar una descripción" y no pasa de
+  ahí. Con descripción, abre un segundo iframe (servlet `archivotemporalsubir`)
+  que sí trae un `input[type=file]` de verdad —
+  `#fileuploadUPLOADIFYContainer`, jQuery file-upload —, así que el archivo entra
+  con `set_input_files` y **sin diálogo nativo de Windows y sin escribir en
+  disco**: se le pasa el contenido que mandó la web. La subida arranca sola y el
+  popup de subida se cierra solo al terminar; la señal de que terminó es la fila
+  nueva en la grilla del alta. Al final, "Salir" (`input[name=BTNCANCEL]`) cierra
+  el alta y la fila queda en `#GridarchivocomprobanteContainerTbl`. Todo el ciclo
+  tarda ~2,5 s.
+- **Los archivos temporales NO se limpian al recargar la pantalla**: siguen en la
+  sesión. Si el comprobante anterior se canceló o se saltó, su adjunto queda y se
+  iría pegado al siguiente — cargar en SISalud un comprobante con el PDF de otro.
+  Por eso `adjuntar_comprobante()` borra lo que encuentre antes de subir
+  (`#vELIMINARARCHIVO_0001` en cada fila del alta, sin diálogo de confirmación) y
+  lo avisa como aviso leve. Lo normal es que no haya nada que borrar.
+- **Al borrar un adjunto no hay que esperar a `esperar_genexus`**: el postback es
+  del iframe, y la máscara que deja en la pantalla de atrás no se va hasta el
+  timeout entero — 20 s por adjunto. Se espera a que la fila se vaya del popup.
+- **Un popup a medio camino traba la pantalla entera**, así que todo fallo del
+  adjunto cierra lo que haya abierto con `gx.popup.currentPopup.close()` en bucle
+  (`CERRAR_POPUPS`). Probado con los dos popups abiertos: los cierra, no deja
+  máscara y la pantalla queda usable. El comprobante ya cargado tiene que quedar
+  confirmable aunque el adjunto haya que ponerlo a mano.
+- **La grilla de archivos tiene una fila fantasma**: la de títulos también cae
+  adentro del `tbody`, así que contar `tbody tr` da uno de más siempre, incluso
+  con la lista vacía. Contar `tbody tr:has(td)`.
 - **`maxlength=150` en la descripción**: recorta sin avisar. Con el extractor viejo, 53 de las 63 muestras pasaban de 150 (176–339 caracteres) porque arrastraban las columnas numéricas del renglón. Desde que `extraer_descripcion()` las saca (2026-09-10), 45 caracteres menos en promedio y **27 de 63** siguen pasando de 150. Las que pasan las recorta el operador, viendo el contador en la web.
 
 ## Referencia de la pantalla SISalud (verificado por CDP contra la pantalla real)
@@ -241,6 +285,9 @@ Los `id` de los combos y sus `value` — usar siempre `select_option(value=...)`
 
 - `#vTIPOCOMPROBANTECODIGO`: `CUDBC` Nota de débito "X", `FACCC` Factura "C" - Prestador, `FACXC` Factura "X", `NCCC` Nota de Crédito "C", `NDBC` Nota de Débito "B", `NDCC` Nota de Débito "C", `RECCC` Recibo "C", `REIN` Reintegro - Propio.
 - `#vEXENTOCENTROCOSTOCODIGO` (renglón exento del detalle, el que usa AutoFiller) y `#vCENTROCOSTOCODIGO` (renglón gravado): mismas 24 opciones — `3` 28 DE OCTUBRE, `4` FRIAS, `5` SALTA, `7` MENDOZA, `8` SAN JUAN, `9` ENTRE RIOS, `12` BARKER, `13` CORDOBA, `14` OLAVARRIA, `22` TANDIL, `33` NEUQUEN, `54` SAN LUIS, `55` BUENOS AIRES, `61` MINA AGUILAR, `62` SANTA CRUZ, `64` RIO NEGRO, `71` CATAMARCA, `73` JUJUY, `74` CHUBUT, `76` HOTEL OSAM BS.AS. Nº4037, `77` COLONIA 28 DE OCTUBRE, `78` HOTEL MAR DEL PLATA, `79` HOTEL BUENOS AIRES, `81` CENTRAL (valor por defecto). Hay que setearlo **antes** de clickear `#IMAGE3`.
+- `#vARCHIVOTEMPORALTIPO` (bloque Archivos, adentro del popup de alta): una sola
+  opción, `1` = Comprobante, y viene elegida. Solo se la toca si viniera en otra:
+  seleccionar dispara el evento de GeneXus al pedo.
 - `#span_vENTIDADDOMICILIOPROVINCIA`: provincia del prestador según el maestro de entidades, que SISalud completa sola al elegir la entidad por CUIT. Se usa como control cruzado.
 
 ## Muestras (`samples/`)
@@ -432,6 +479,33 @@ Ver "Arquitectura" arriba. Se descartó la web pura (todo headless en el servido
 aunque SISalud sea alcanzable desde internet: perdería el control visual del
 operador antes de confirmar.
 
+### 4. Adjuntar el comprobante — IMPLEMENTADO (2026-09-11)
+
+El comprobante tiene que quedar adjunto en la Carga Rápida, con **`FACTURA` en la
+Descripción** y tipo **Comprobante** (lo pidió el operador; es la única opción del
+combo). Lo hace `adjuntar_comprobante()` en `agente/sisalud.py`: el mecanismo de
+los tres popups y sus trampas están arriba, en "Comportamiento de la pantalla".
+
+Dos decisiones:
+
+- **El archivo lo manda la web al agente**, en base64 adentro del JSON de
+  `/api/trabajo` (`Trabajo.contenido`). Es el mismo archivo que el operador
+  soltó en la cola: la web ya lo tiene en memoria, así que no se lo vuelve a
+  pedir al servidor —que además no guarda nada— y nunca sale de la PC. En
+  `app.js` lo convierte `aBase64()`, de a pedazos de 32 KB: un
+  `String.fromCharCode(...bytes)` de una foto de celular revienta la pila.
+- **Va ANTES de la cabecera**, no al final. El adjunto sobrevive entero a todos
+  los postbacks de la carga (medido), y hacerlo primero significa que si los
+  popups fallan todavía no hay nada cargado que se pueda perder.
+
+Si no se puede adjuntar —no llegó el archivo, el popup no abrió, la subida falló—
+se avisa ("Adjuntá el comprobante a mano."), se cierran los popups y **la carga
+sigue igual**: el adjunto no puede costar el comprobante.
+
+Probado contra la pantalla real con dos muestras seguidas, incluyendo el caso de
+que el anterior haya quedado sin confirmar. Falta probarlo con una **foto** de
+celular (no hay muestras) y dentro de un lote disparado desde la web.
+
 ## Cómo probar
 
 - **La extracción, contra las muestras**: `extraer(nombre, contenido)` de
@@ -462,6 +536,12 @@ operador antes de confirmar.
   python arrancar.py` (así aparece su propio ícono en la bandeja y no se pisa nada).
   El `.exe` compilado se diagnostica con `AutoFillerAgente.exe --probar`, que verifica
   orígenes, Chrome, el driver de Playwright y que el ícono de la bandeja se pueda crear.
+- **El adjunto, sin cargar nada más**: con Chrome abierto en la pantalla y
+  `--remote-debugging-port=9222`, `adjuntar_comprobante(page, nombre, contenido,
+  avisos)` se puede llamar sola sobre la pantalla vacía y deja la fila en el
+  bloque Archivos. Lo que sube queda como archivo temporal de la sesión: se borra
+  desde el mismo popup (o lo borra la próxima corrida, que limpia antes de
+  subir).
 - **De punta a punta**: cargar la cola desde la web y resolver cada comprobante con
   Cancelar (`input[name=BUTTON2]`) o con los botones del cartel
   (`window.autofillerAccion('saltar'|'detener')`). **No confirmar nunca: graba de
