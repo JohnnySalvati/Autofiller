@@ -110,7 +110,7 @@ Es lo único que toca SISalud, y corre en la PC del operador.
   sección siguiente intactos (máscara, orden de carga, `fill` sin blur). Lo único
   que no viene del escritorio es `adjuntar_comprobante()` (2026-09-11): sube el
   PDF o la foto al bloque **Archivos** de la pantalla, con la descripción
-  `FACTURA` (ver "El adjunto", abajo).
+  `FACTURA` (requerimiento 4).
 - `operador.py`: el cartel inyectado en la pantalla, `ControlLote` (acá `Control`) y
   `esperar_resolucion`. Sin cambios de lógica; el botón dice "Detener la cola".
   El cartel ocupa la **mitad izquierda** (`width:50%`, 2026-09-11): SISalud saca sus
@@ -219,10 +219,13 @@ descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.e
 - No hay "mover a `cargados/`": en la web no hay una carpeta que mover. El equivalente
   es el estado por comprobante en la cola y el resumen al terminar.
 
-### `AutoFiller.py` (escritorio) — se mantiene
+### `AutoFiller.py` (escritorio) — congelado
 
 Sigue funcionando y es lo que usan hoy los operadores. Queda hasta que la web esté
-desplegada. Desde 2026-09-10 **ya no trae credenciales hardcodeadas**: los campos
+desplegada, pero **no se toca más** (decisión del usuario, 2026-09-11): las
+mejoras nuevas van al agente y a la web. El requerimiento 4 (adjuntar el
+comprobante) es el primero que existe solo en la web.
+Desde 2026-09-10 **ya no trae credenciales hardcodeadas**: los campos
 Usuario y Contraseña arrancan vacíos y `credenciales()` frena el procesamiento con
 un `messagebox` si falta alguno, en vez de intentar el login en blanco. La clave
 que estaba en el código sigue estando en el historial de git y dentro de
@@ -312,11 +315,16 @@ mantiene):
   puede fijar por entorno; no hay ícono ni cwd que importe; Playwright no
   necesita browsers descargados.
 - **`requirements.txt`**: separado por componente y en UTF-8.
+- **Selectores frágiles**: el del prompt de entidades dependía del título literal
+  del iframe, con los parámetros de la llamada pegados (`?34,,0,10,c,,`). En el
+  agente es `iframe[title^="Promptentidad"]` desde 2026-09-11; el escritorio,
+  congelado, se queda con el literal. El resto son `id` de GeneXus: estables
+  mientras no se rehaga la pantalla. Ojo igual: hay que entrar por `URL_CARGA`
+  (con el `?10,0`), porque el prompt que abre la pantalla sin esos parámetros no
+  trae el link de selección en su grilla.
 
 Pendientes:
 
-- **Selectores frágiles**: el iframe del prompt sigue dependiendo del título literal
-  con `?34` (`SELECTOR_PROMPT` en `agente/sisalud.py`).
 - **Higiene del repo**: `chromedriver.exe` (18 MB, no se usa), `tempCodeRunnerFile.py`
   (copia vieja de `main()`) y `venv/` commiteado siguen ahí. No se borraron porque
   nadie lo pidió.
@@ -485,6 +493,7 @@ El comprobante tiene que quedar adjunto en la Carga Rápida, con **`FACTURA` en 
 Descripción** y tipo **Comprobante** (lo pidió el operador; es la única opción del
 combo). Lo hace `adjuntar_comprobante()` en `agente/sisalud.py`: el mecanismo de
 los tres popups y sus trampas están arriba, en "Comportamiento de la pantalla".
+Solo en la web: el escritorio quedó congelado.
 
 Dos decisiones:
 

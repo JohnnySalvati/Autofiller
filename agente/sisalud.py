@@ -28,7 +28,14 @@ URL_CARGA = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/cargarapidacompr
 
 SIN_MASCARA = "() => !document.querySelector('div.gx-mask')"
 
-SELECTOR_PROMPT = "iframe[title=\"Promptentidad\\?34\\,\\,0\\,10\\,c\\,\\,gxPopupLevel\\%3D0\\%3B\"]"
+# Por el arranque del titulo y no por el titulo entero: el iframe del prompt
+# lleva pegados los parametros de la llamada (?34,,0,10,c,,gxPopupLevel...) y
+# esos cambian segun como se haya abierto la pantalla. Con el titulo literal,
+# una Carga Rapida abierta de otra forma dejaba el prompt sin encontrar y el
+# fill se comia 30 s de timeout. Es el unico iframe abierto en ese momento.
+# (Aun asi, hay que entrar por URL_CARGA: medido el 2026-09-11, el prompt que
+# abre la pantalla sin el ?10,0 no trae el link de seleccion en su grilla.)
+SELECTOR_PROMPT = "iframe[title^=\"Promptentidad\"]"
 
 # Los dos popups del adjunto, encadenados: "Adjuntar" abre el alta de archivos
 # (servlet temporalarchivos) y "Agregar Archivo" abre adentro el control de
