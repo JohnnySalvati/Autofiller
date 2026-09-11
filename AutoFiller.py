@@ -1008,7 +1008,7 @@ app = tk.Tk()
 app.title("AutoFiller")
 app.geometry("1100x420")
 app.configure(bg="#f7f7f9")  # Fondo suave
-app.iconbitmap("insoft.ico")
+app.iconbitmap("autofiller.ico")
 
 # Variables de entrada
 user_var = tk.StringVar()

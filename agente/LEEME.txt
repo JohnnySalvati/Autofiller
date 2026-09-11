@@ -20,15 +20,34 @@ Instalacion (una sola vez)
 
 3. Doble clic en  AutoFillerAgente.exe
 
-Listo. Se abre una ventana negra que dice "Escuchando en 127.0.0.1:8765".
-Esa ventana es la senal de que el agente esta andando: dejala abierta.
+No se abre ninguna ventana: el agente queda como un icono al lado del reloj.
+Windows lo guarda en "Iconos ocultos", atras de la flechita ^ que esta a la
+izquierda de la hora. Ahi esta, y eso significa que esta andando.
+
+Si lo queres ver siempre, abri la flechita ^ y arrastra el icono de AutoFiller
+hasta la barra, al lado del reloj. Queda asi para siempre.
+
+
+El icono
+--------
+
+Pasale el mouse por encima: dice en que anda ("Listo", "Cargando el comprobante
+3 de 12", "Esperando que confirmes en SISalud").
+
+Clic derecho, y tenes:
+
+  Abrir AutoFiller     Abre la web para subir comprobantes.
+  Ver la actividad     Muestra lo que el agente viene haciendo. Es lo que hay
+                       que mirar (o copiar y mandarnos) cuando algo falla.
+  Salir del agente     Lo cierra. Si hay un comprobante esperando en SISalud,
+                       primero te avisa.
 
 
 Todos los dias
 --------------
 
-No tenes que hacer nada: el agente arranca solo con Windows. Si lo cerraste sin
-querer, volve a abrir AutoFillerAgente.exe.
+No tenes que hacer nada: el agente arranca solo con Windows, sin ventanas y sin
+pedirte nada.
 
 Entra a la web de AutoFiller, subí los comprobantes, revisalos y toca "Cargar en
 SISalud". El agente hace el resto y te deja la pantalla lista para que mires y
@@ -47,14 +66,22 @@ Lo que hay que saber
 * No dejes varias pestanas de la Carga Rapida abiertas. Se pisan la sesion y la
   pantalla queda trabada con un velo gris encima. Si pasa, F5 la destraba.
 
-* Si la web dice "No se detecta el agente", casi siempre es que la ventana negra
-  esta cerrada. Abri AutoFillerAgente.exe.
+* Si la web dice "No se detecta el agente", el agente no esta abierto: fijate si
+  el icono esta al lado del reloj (acordate de la flechita ^). Si no esta, doble
+  clic en AutoFillerAgente.exe.
 
 
 Si algo falla
 -------------
 
-La ventana negra muestra lo que esta pasando. Si aparece un error, sacale una
-foto o copiala antes de cerrarla: ahi esta la explicacion.
+Clic derecho en el icono -> Ver la actividad. Ahi esta lo que paso, en vivo.
+El boton "Copiar todo" te lo deja en el portapapeles para pegarlo en un mail.
+
+Todo eso queda guardado en un archivo, asi que tambien se puede revisar un error
+de ayer:
+
+  %LOCALAPPDATA%\AutoFiller\agente.log
+
+("Abrir la carpeta", en la misma ventana, te lleva derecho ahi.)
 
 InSoft - soporte@insoft.net.ar

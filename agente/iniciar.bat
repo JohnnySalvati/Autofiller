@@ -17,10 +17,14 @@ REM estos origenes: cualquier otra pagina abierta en el navegador no puede
 REM hacerle cargar comprobantes. Cambiar al desplegar el servidor.
 if "%AUTOFILLER_ORIGENES%"=="" set AUTOFILLER_ORIGENES=http://localhost:8000,http://127.0.0.1:8000
 
-echo Agente de AutoFiller escuchando en 127.0.0.1:8765
-echo Origenes permitidos: %AUTOFILLER_ORIGENES%
-echo Dejalo abierto mientras cargas comprobantes.
-.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8765
+REM arrancar.py y no "uvicorn main:app": es el mismo arranque que el .exe, asi
+REM que lo que se prueba aca es lo que el operador va a tener (icono en la
+REM bandeja incluido). La consola igual muestra todo: desde el codigo el log va
+REM al archivo Y a la ventana.
+REM
+REM Si el agente del operador ya esta andando en esta PC, el puerto esta tomado:
+REM   set AUTOFILLER_PUERTO=8799
+.venv\Scripts\python.exe arrancar.py
 goto :eof
 
 :error

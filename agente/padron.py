@@ -24,15 +24,20 @@ pantalla cambio, lo que sea -- se vuelve a la aproximacion por domicilio, que ya
 funciona. La consulta solo puede mejorar el resultado, nunca empeorarlo respecto
 de lo que habia antes.
 
-La trampa de la pantalla
-------------------------
-`wwafiliado` tiene los campos de filtro en el DOM desde que carga, pero el
-servidor los IGNORA hasta que se elige `Orden Por`. Llenar el documento sin eso
-devuelve cero filas siempre, sin ningun mensaje: se ve igual que "ese afiliado
-no existe". Hay que setear `#vAFILIADOORDENPOR` primero y esperar el postback.
+Las dos trampas de la pantalla
+------------------------------
+1. `wwafiliado` tiene los campos de filtro en el DOM desde que carga, pero el
+   servidor los IGNORA hasta que se elige `Orden Por`. Llenar el documento sin
+   eso devuelve cero filas siempre, sin ningun mensaje: se ve igual que "ese
+   afiliado no existe". Hay que setear `#vAFILIADOORDENPOR` primero.
+2. El combo `Orden Por` es ademas el que destapa el filtro que corresponde
+   (`#TDOCUMENTO` y companiia estan en `display:none`), y lo hace desde su
+   onchange, que GeneXus conecta DESPUES del load. Ver `_elegir_orden`: si se
+   selecciona antes de que ese handler exista, el filtro no aparece nunca.
 """
 
 import re
+import time
 import unicodedata
 
 from sisalud import esperar_genexus
@@ -54,8 +59,19 @@ def clave(nombre):
 URL_PADRON = "http://vpn.aomaosam.org.ar:8081/sisaludevo/servlet/wwafiliado"
 
 # Valores del combo "Orden Por", que es lo que habilita cada filtro.
+ORDEN_POR_NINGUNO = "0"
 ORDEN_POR_DOCUMENTO = "3"
 ORDEN_POR_NUMERO_AFILIADO = "1"
+
+# Cuantas veces se reintenta elegir el Orden Por, y cuanto se le da en cada
+# intento al filtro para aparecer. Ver _elegir_orden.
+INTENTOS_ORDEN = 5
+ESPERA_FILTRO = 2.0
+
+# Timeout corto para todo lo que se toca en esta pantalla: si algo no esta como
+# se espera, conviene caer rapido en la aproximacion por domicilio y no dejar al
+# operador un minuto mirando la pantalla de afiliados.
+TIMEOUT = 8000
 
 # Delegacion del padron -> centro de costos de la Carga Rapida.
 #
@@ -144,14 +160,54 @@ LEER_DELEGACION = """
 """
 
 
+async def _elegir_orden(page, orden_por, campo_id):
+    """Elige `Orden Por` y se asegura de que el filtro haya aparecido.
+
+    El combo hace dos cosas: le dice al servidor por que campo filtrar, y destapa
+    en la pantalla el filtro que corresponde -- los demas son tablas en
+    `display:none`. Lo segundo lo hace su onchange, y GeneXus conecta ese handler
+    DESPUES del load de la pagina: medido contra la pantalla real el 2026-09-11,
+    entre 250 y 500 ms despues de que vuelve el goto.
+
+    Si se selecciona antes de esa ventana, el valor queda puesto pero el filtro
+    nunca se destapa, y como el combo YA tiene el valor elegido, ningun evento
+    posterior lo arregla: el fill() se queda esperando un campo invisible hasta
+    agotar su timeout, y despues de un minuto de pantalla de afiliados el
+    comprobante termina cargado con el centro de costos del domicilio.
+
+    Era una carrera que se ganaba o se perdia segun lo que tardara el servidor:
+    con la pagina cacheada el goto vuelve en 0,2 s y se pierde siempre, que es
+    por que "ayer andaba".
+
+    Por eso aca no se confia en la seleccion: se verifica que el campo este
+    visible y, si no, se vuelve a intentar. Pasar por 0 antes de reintentar es lo
+    que hace que el segundo intento sea un cambio de verdad y dispare el evento.
+    """
+    combo = page.locator("#vAFILIADOORDENPOR")
+    campo = page.locator(f"#{campo_id}")
+    for intento in range(INTENTOS_ORDEN):
+        if intento:
+            await combo.select_option(value=ORDEN_POR_NINGUNO, timeout=TIMEOUT)
+            await page.wait_for_timeout(300)
+        await combo.select_option(value=orden_por, timeout=TIMEOUT)
+        await esperar_genexus(page)
+
+        limite = time.monotonic() + ESPERA_FILTRO
+        while time.monotonic() < limite:
+            if await campo.is_visible():
+                return
+            await page.wait_for_timeout(100)
+
+    raise RuntimeError(
+        f"el filtro {campo_id} no apareció al elegir el Orden Por")
+
+
 async def _buscar(page, orden_por, campo_id, valor):
     """Corre una busqueda en wwafiliado y devuelve las delegaciones que salieron."""
-    # Primero el Orden Por: hasta que no se elige, el servidor ignora el filtro.
-    await page.locator("#vAFILIADOORDENPOR").select_option(value=orden_por, timeout=8000)
-    await esperar_genexus(page)
+    await _elegir_orden(page, orden_por, campo_id)
 
-    await page.locator(f"#{campo_id}").fill(valor)
-    await page.locator("input[name='SEARCHBUTTON']").click()
+    await page.locator(f"#{campo_id}").fill(valor, timeout=TIMEOUT)
+    await page.locator("input[name='SEARCHBUTTON']").click(timeout=TIMEOUT)
     await esperar_genexus(page)
 
     return await page.evaluate(LEER_DELEGACION) or []
@@ -180,13 +236,12 @@ async def centro_costo_del_afiliado(page, factura, avisos):
         # identifica a la persona y el numero puede venir con el orden pegado.
         if not delegaciones and factura.nro_afiliado:
             numero, _, orden = factura.nro_afiliado.partition("/")
-            await page.locator("#vAFILIADOORDENPOR").select_option(
-                value=ORDEN_POR_NUMERO_AFILIADO, timeout=8000)
-            await esperar_genexus(page)
-            await page.locator("#vFILAFILIADONUMERO").fill(numero)
+            await _elegir_orden(page, ORDEN_POR_NUMERO_AFILIADO, "vFILAFILIADONUMERO")
+            await page.locator("#vFILAFILIADONUMERO").fill(numero, timeout=TIMEOUT)
             if orden:
-                await page.locator("#vFILAFILIADOORDEN").fill(orden.lstrip("0") or "0")
-            await page.locator("input[name='SEARCHBUTTON']").click()
+                await page.locator("#vFILAFILIADOORDEN").fill(
+                    orden.lstrip("0") or "0", timeout=TIMEOUT)
+            await page.locator("input[name='SEARCHBUTTON']").click(timeout=TIMEOUT)
             await esperar_genexus(page)
             delegaciones = await page.evaluate(LEER_DELEGACION) or []
     except Exception as e:

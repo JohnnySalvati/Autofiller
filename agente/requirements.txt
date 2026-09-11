@@ -6,3 +6,9 @@ uvicorn[standard]>=0.30
 # correr "playwright install": no usa los navegadores que descarga, solo el
 # driver que viene en el paquete.
 playwright>=1.45
+
+# El agente vive en la bandeja del sistema: un icono al lado del reloj en vez de
+# una ventana de consola abierta todo el dia. pystray necesita Pillow para la
+# imagen del icono. El visor del log usa Tkinter, que viene con Python.
+pystray>=0.19
+pillow>=10

@@ -93,6 +93,15 @@ interruptor queda adentro de la letra y lo único que asoma es el círculo blanc
 salió angosta para que entrara el punto sin pisar la pata, y el travesaño va bajo
 (`y 72`) para que el contrapunzón triangular no se cierre.
 
+**El SVG es el único dibujo de la marca.** Windows necesita un `.ico` (el ícono del
+`.exe`, el de la bandeja del agente, el de la ventana de actividad): lo genera
+`hacer_icono.py` desde `web/logo.svg`, rasterizando con el mismo Chrome que usa el
+agente (headless, fondo transparente) y armando con Pillow los nueve tamaños del
+`autofiller.ico` de la raíz (16 a 256; Windows escala feo si le falta el que necesita,
+y de 256 a 16 el trazo queda un borrón). Se corre a mano cuando cambia el logo y el
+`.ico` se versiona. Hasta 2026-09-11 el agente mostraba en la bandeja el `insoft.ico`
+del escritorio —el ícono de la empresa, no el del producto—, que ya no está en el repo.
+
 ### `agente/` — carga en SISalud (FastAPI en `127.0.0.1:8765`)
 
 Es lo único que toca SISalud, y corre en la PC del operador.
@@ -107,6 +116,55 @@ Es lo único que toca SISalud, y corre en la PC del operador.
 - `main.py`: `POST /api/sesion` (credenciales, quedan en memoria), `POST /api/trabajo`
   (arranca uno y vuelve enseguida), `GET /api/trabajo` (fase: `cargando` → `esperando`
   → `terminado`), `POST /api/accion` (`saltar`/`detener`), `POST /api/listo`.
+- `arrancar.py`: el entrypoint del `.exe`. Importa `app` de verdad (adentro de
+  PyInstaller no hay `main.py` que importar por texto), corre uvicorn **en un hilo**
+  y deja el hilo principal para la bandeja, que es donde tiene que vivir el bucle de
+  mensajes del ícono. `--consola` fuerza el arranque viejo (uvicorn en el principal,
+  todo a la vista): es la vía de soporte si la bandeja falla en una PC, sin recompilar.
+  `--probar` es el autodiagnóstico. `AUTOFILLER_PUERTO` existe solo para levantar un
+  agente de prueba sin pisar al que el operador tiene andando.
+
+**El agente vive en la bandeja del sistema (2026-09-11)**, sin ventana: Windows 11 lo
+manda a "Iconos ocultos" y el operador lo arrastra afuera si lo quiere a la vista. Antes
+dejaba una consola abierta todo el día, que además de ruidosa era un botón de apagado
+accidental — cerrarla con la X mataba el agente y la web pasaba a decir "no se detecta
+el agente".
+
+- `bandeja.py`: el ícono (`pystray` + `Pillow`, imagen tomada de `autofiller.ico`) y su
+  menú: *Abrir AutoFiller* (el primer origen de `AUTOFILLER_ORIGENES`, así no hay una
+  segunda configuración que pueda quedar vieja), *Ver la actividad*, el estado como
+  renglón deshabilitado, y *Salir del agente*, que **pregunta** si hay un comprobante
+  esperando resolución en vez de cortar el lote. pystray no se entera solo de que el
+  texto de un item cambió: hay un hilo que cada 2 s reasigna el tooltip y llama
+  `update_menu()`. También expone `avisar()`/`preguntar()` (MessageBoxW por ctypes):
+  sin consola, un cartel de Windows es la única forma de que un fallo de arranque se
+  vea.
+- `registro.py`: **esto es lo que reemplaza a la consola, y no es una pérdida**. Manda
+  `stdout` y `stderr` (los prints de `sisalud.py`, los renglones de uvicorn, cualquier
+  traceback) a `%LOCALAPPDATA%\AutoFiller\agente.log`, line-buffered y con rotación a
+  mano a los 2 MB. Hay que llamarlo **antes** de importar cualquier cosa que imprima:
+  uvicorn se queda con el stream que encuentra al arrancar. Corriendo desde el código
+  escribe en los dos lados. Queda mejor que la ventana negra, que se perdía entera al
+  cerrarla: ahora un error de ayer se puede leer hoy.
+- `visor.py`: la ventana de actividad (Tkinter), que muestra el log en vivo con
+  *Copiar todo* y *Abrir la carpeta*. Corre en su propio hilo con su propio mainloop
+  —válido mientras todos los widgets se creen y se toquen ahí, que es el caso: el
+  resto del agente le habla por `Event`— porque el hilo principal ya es de la bandeja.
+  Una sola instancia: el segundo pedido la trae al frente. Cerrarla no apaga el agente.
+- `recursos.py`: resuelve el `autofiller.ico` adentro del `.exe` (`sys._MEIPASS`) o al
+  lado del fuente. El ícono se empaqueta con `--add-data`, no solo como icono del
+  `.exe`: es la imagen que se dibuja en la bandeja.
+
+**`--noconsole` en el empaquetado no es la vuelta al error del escritorio**: ahí el
+`--noconsole` *escondía* los errores (el operador solo veía "Factura inválida"); acá
+todo queda en el log y el menú lo abre. Lo que sí cambia es el autodiagnóstico, porque
+un proceso sin consola no recibe la del `cmd` que lo llamó: `--probar` se reengancha con
+`AttachConsole(-1)` para que su salida se vea, y si no lo logra muestra el resultado en
+un cartel. De ahí `--sin-carteles`, que `empaquetar.bat` pasa siempre: un cartel que
+nadie va a clickear deja el empaquetado colgado para siempre (pasó mientras se probaba
+esto). Medido el 2026-09-11 y anotado porque es al revés de lo que se suele creer: desde
+un `.bat`, **cmd sí espera a un programa sin consola y sí propaga su `errorlevel`**, así
+que la llamada directa sigue sirviendo y no hace falta `start /b /wait`.
 
 **CORS y Private Network Access**: el agente escucha en `127.0.0.1`, así que cualquier
 página abierta en el navegador podría hablarle. Por eso `AUTOFILLER_ORIGENES` es una
@@ -128,7 +186,9 @@ descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.e
 - Soporta fotos (requerimiento 2).
 - Las credenciales salieron del código: se piden en la web y van solo al agente.
 - Los errores son visibles: el escritorio compilaba `--noconsole` y el operador solo
-  veía "Factura inválida".
+  veía "Factura inválida". El agente también se compila sin consola, pero todo lo que
+  pasa queda en `%LOCALAPPDATA%\AutoFiller\agente.log` y se lee desde el menú del
+  ícono (*Ver la actividad*).
 - No hay "mover a `cargados/`": en la web no hay una carpeta que mover. El equivalente
   es el estado por comprobante en la cola y el resumen al terminar.
 
@@ -181,7 +241,7 @@ mantiene):
 - **Errores invisibles**: todo vuelve en `Resultado.error` / `avisos` y se ve en la
   cola. Un PDF sin `Hasta:` o sin `Importe Total:` ya no revienta.
 - **Dependencias del entorno**: la ruta de Chrome se busca en varias ubicaciones y se
-  puede fijar por entorno; no hay `insoft.ico` ni cwd que importe; Playwright no
+  puede fijar por entorno; no hay ícono ni cwd que importe; Playwright no
   necesita browsers descargados.
 - **`requirements.txt`**: separado por componente y en UTF-8.
 
@@ -249,10 +309,26 @@ Corre en el **agente**, no en el servidor: es una pantalla más de SISalud y el
 único que tiene Chrome con la sesión del operador es el agente. La consulta va
 antes de abrir la Carga Rápida, y después se vuelve a ella.
 
-**La trampa de `wwafiliado`**: los campos de filtro están en el DOM desde que
-carga la página, pero el servidor los ignora hasta que se elige `Orden Por`
-(`#vAFILIADOORDENPOR`). Llenar el documento sin eso devuelve cero filas siempre,
-sin ningún mensaje, y se ve idéntico a "ese afiliado no existe".
+**Las dos trampas de `wwafiliado`**, las dos alrededor de `#vAFILIADOORDENPOR`:
+
+1. Los campos de filtro están en el DOM desde que carga la página, pero el
+   servidor los ignora hasta que se elige `Orden Por`. Llenar el documento sin
+   eso devuelve cero filas siempre, sin ningún mensaje, y se ve idéntico a "ese
+   afiliado no existe".
+2. **Ese combo es también el que destapa el filtro**: `#TDOCUMENTO` y las demás
+   tablas de filtro están en `display:none`, y las muestra el `onchange` del
+   combo, que **GeneXus conecta después del load** (medido el 2026-09-11: entre
+   250 y 500 ms después de que vuelve el `goto`). Seleccionar antes de esa
+   ventana deja el valor puesto y el filtro tapado para siempre —como el combo
+   ya tiene el valor, ningún evento posterior lo arregla—, y el `fill` se come
+   entero su timeout esperando un campo invisible. Es una carrera que se gana o
+   se pierde según lo que tarde el servidor: con la página cacheada el `goto`
+   vuelve en 0,2 s y se pierde **siempre**, así que "ayer andaba" era suerte.
+   `_elegir_orden` (2026-09-11) no confía en la selección: verifica que el campo
+   esté visible y reintenta pasando por `Seleccione..`, que es lo que hace que el
+   segundo intento sea un cambio de verdad. Todo lo que toca esta pantalla usa
+   timeout de 8 s: si algo no está, conviene degradar rápido al domicilio y no
+   dejar al operador un minuto mirando la pantalla de afiliados.
 
 **Degradado (decisión del usuario)**: si el padrón no contesta por lo que sea
 —sin DNI, DNI ausente, la pantalla cambió, más de una delegación, delegación sin
@@ -360,7 +436,11 @@ operador antes de confirmar.
   los nombres de archivo con espacios: `curl` los parte y el pedido nunca sale.
 - **El agente, sin tocar SISalud**: `agente\iniciar.bat` y pegarle a `/api/salud`,
   `/api/sesion` y `/api/accion`. **No** llamar a `/api/trabajo`: eso abre Chrome y
-  carga de verdad en la pantalla.
+  carga de verdad en la pantalla. Si el operador ya tiene su agente andando, el puerto
+  8765 está tomado: levantar el de prueba con `AUTOFILLER_PUERTO=8799
+  python arrancar.py` (así aparece su propio ícono en la bandeja y no se pisa nada).
+  El `.exe` compilado se diagnostica con `AutoFillerAgente.exe --probar`, que verifica
+  orígenes, Chrome, el driver de Playwright y que el ícono de la bandeja se pueda crear.
 - **De punta a punta**: cargar la cola desde la web y resolver cada comprobante con
   Cancelar (`input[name=BUTTON2]`) o con los botones del cartel
   (`window.autofillerAccion('saltar'|'detener')`). **No confirmar nunca: graba de

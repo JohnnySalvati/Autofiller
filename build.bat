@@ -5,7 +5,7 @@ set SCRIPT=AutoFiller.py
 
 
 REM Ejecutar pyinstaller con opciones
-pyinstaller --onefile --noconsole --icon insoft.ico --noconfirm %SCRIPT%
+pyinstaller --onefile --noconsole --icon autofiller.ico --noconfirm %SCRIPT%
 
 
 pause

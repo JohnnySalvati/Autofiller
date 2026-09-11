@@ -109,7 +109,8 @@ function dibujarChips() {
             estado.conectado ? "ok" : "tibio");
   } else {
     agregar("Agente no detectado", "mal",
-            "Arrancá el agente de AutoFiller en esta PC para poder cargar en SISalud.");
+            "Arrancá el agente de AutoFiller en esta PC para poder cargar en SISalud. " +
+            "Vive como un ícono al lado del reloj, en \"Iconos ocultos\".");
   }
 
   if (estado.opciones) {
@@ -539,7 +540,8 @@ async function iniciar() {
     $("aviso-sesion").className = "aviso";
     $("aviso-sesion").textContent =
       "No se detecta el agente de AutoFiller en esta PC. Es el programa que abre " +
-      "SISalud en tu Chrome: abrilo y recargá esta página.";
+      "SISalud en tu Chrome: fijate si está su ícono al lado del reloj (atrás de " +
+      "la flechita de \"Iconos ocultos\"). Si no está, abrilo y recargá esta página.";
   }
 
   const zona = $("zona");
