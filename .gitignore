@@ -14,3 +14,9 @@ samples/
 # Prueba de OCR: texto de comprobantes con datos reales de afiliados.
 pruebas/cache_ocr/
 pruebas/resultado_ocr.md
+
+# Empaquetado del agente (PyInstaller): se reconstruye, no se versiona.
+agente/build/
+agente/dist/
+agente/AutoFillerAgente.spec
+agente/AutoFillerAgente.zip

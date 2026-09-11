@@ -193,15 +193,44 @@ comprobantes.
 Tiene que quedar abierto mientras se usa la web — acceso directo en el Inicio de Windows,
 o el operador se va a encontrar con «No se detecta el agente».
 
-> **Empaquetado: pendiente.** Hoy el agente se arranca con `agente\iniciar.bat`, que
-> necesita Python 3.11 instalado en esa PC. Lo decidido es distribuirlo como `.exe`
-> (PyInstaller **onedir**, no `--onefile`: arranca más rápido y lo marca menos el
-> antivirus) adentro de un `.zip` que sirva este mismo servidor, con la web comparando la
-> versión que devuelve `/api/salud` del agente contra la que espera el servidor y
-> avisando cuando hay una nueva. Así el deploy del agente es: compilar, subir el zip, y
-> cada operador se entera solo. Al compilar, PyInstaller no se lleva por su cuenta el
-> driver de Playwright: va con `--collect-all playwright`. Los navegadores siguen sin
-> hacer falta, porque el agente se engancha por CDP al Chrome del operador.
+### Instalar el agente en la PC de un operador
+
+No necesita Python ni pip: es un `.exe`.
+
+1. Pasarle `AutoFillerAgente.zip` (50 MB) y que lo descomprima donde quiera que viva,
+   por ejemplo `C:\AutoFiller`.
+2. Doble clic en **`configurar.bat`**. Deja `AUTOFILLER_ORIGENES` como variable de
+   usuario y crea el acceso directo en la carpeta Inicio, para que el agente arranque
+   con Windows. Acepta el origen como argumento si hay que apuntar a otro lado.
+3. Doble clic en **`AutoFillerAgente.exe`**. La ventana de consola que se abre es la
+   señal de que está andando: va a la vista a propósito, porque es donde se ven los
+   errores. El `.exe` viejo se compilaba con `--noconsole` y el operador solo veía
+   «Factura inválida».
+
+**Para verificar la instalación sin cargar un comprobante de verdad**:
+`AutoFillerAgente.exe --probar`. Ejercita las dos cosas que pueden faltar en una PC
+nueva —el driver de Playwright, que es un `node.exe` empaquetado, y la ruta de
+Chrome— y dice qué falta. No abre el navegador ni toca SISalud.
+
+Chrome tiene que estar instalado; si no está en la ruta estándar, se le indica con
+`AUTOFILLER_CHROME`.
+
+### Generar el zip
+
+`agente\empaquetar.bat` compila, corre el autodiagnóstico sobre lo compilado —si falla,
+no genera el zip— y deja `AutoFillerAgente.zip` listo.
+
+Dos cosas del build que no son opcionales y están en el script: **onedir** y no
+`--onefile` (arranca más rápido y los antivirus lo marcan menos), y
+**`--collect-all playwright`**, porque Playwright trae su propio `node.exe` y
+PyInstaller no se lo lleva solo — sin eso el agente compila bien y falla recién al
+intentar abrir Chrome, en la PC del operador. Los navegadores que Playwright descarga
+siguen sin hacer falta: el agente se engancha por CDP al Chrome que ya está.
+
+> **Pendiente**: servir el zip desde este mismo servidor y que la web compare la versión
+> que devuelve `/api/salud` del agente contra la que espera el servidor, avisando cuando
+> hay una nueva. Con eso el deploy del agente es compilar, subir el zip, y cada operador
+> se entera solo. Hoy hay que pasarles el zip a mano.
 
 ---
 

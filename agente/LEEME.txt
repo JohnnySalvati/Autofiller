@@ -1,0 +1,60 @@
+AutoFiller - Agente
+===================
+
+Esto es la mitad de AutoFiller que corre en TU PC. Es lo unico que toca SISalud:
+recibe el comprobante ya leido y revisado desde la web, lo carga en la pantalla
+de Carga Rapida y espera a que vos confirmes o canceles.
+
+NUNCA confirma solo. La ultima palabra es siempre tuya.
+
+
+Instalacion (una sola vez)
+--------------------------
+
+1. Descomprimi esta carpeta donde quieras que viva. Por ejemplo:
+   C:\AutoFiller
+
+2. Doble clic en  configurar.bat
+   Deja puesta la direccion de la web y hace que el agente arranque junto con
+   Windows. No instala nada mas.
+
+3. Doble clic en  AutoFillerAgente.exe
+
+Listo. Se abre una ventana negra que dice "Escuchando en 127.0.0.1:8765".
+Esa ventana es la senal de que el agente esta andando: dejala abierta.
+
+
+Todos los dias
+--------------
+
+No tenes que hacer nada: el agente arranca solo con Windows. Si lo cerraste sin
+querer, volve a abrir AutoFillerAgente.exe.
+
+Entra a la web de AutoFiller, subí los comprobantes, revisalos y toca "Cargar en
+SISalud". El agente hace el resto y te deja la pantalla lista para que mires y
+confirmes.
+
+
+Lo que hay que saber
+--------------------
+
+* El agente y el AutoFiller.exe viejo manejan el MISMO Chrome. No los uses a la
+  vez: termina el lote en uno y cerralo antes de abrir el otro.
+
+* La primera vez, Chrome se abre con un perfil nuevo y te va a pedir el usuario
+  y la clave de SISalud. Es una sola vez; despues queda.
+
+* No dejes varias pestanas de la Carga Rapida abiertas. Se pisan la sesion y la
+  pantalla queda trabada con un velo gris encima. Si pasa, F5 la destraba.
+
+* Si la web dice "No se detecta el agente", casi siempre es que la ventana negra
+  esta cerrada. Abri AutoFillerAgente.exe.
+
+
+Si algo falla
+-------------
+
+La ventana negra muestra lo que esta pasando. Si aparece un error, sacale una
+foto o copiala antes de cerrarla: ahi esta la explicacion.
+
+InSoft - soporte@insoft.net.ar
