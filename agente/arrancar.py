@@ -139,6 +139,24 @@ def probar():
         decir(f"  Bandeja del sistema: FALLÓ ({type(e).__name__}: {e})")
         problemas += 1
 
+    # La actualización automática no es un requisito para cargar comprobantes,
+    # así que nada de acá suma problemas: es información para cuando una PC se
+    # queda vieja y hay que saber por dónde iba a buscar.
+    import actualizacion
+
+    origen = actualizacion.origen_de(ORIGENES)
+    if not origen:
+        decir("  Actualización automática: sin origen, no se busca ninguna")
+    else:
+        actualizacion.TIEMPO_RED = 8  # el empaquetado no puede esperar 30 s
+        info = actualizacion.consultar(origen)
+        if not info:
+            decir(f"  Actualización automática: {origen} no publica ninguna versión")
+        elif actualizacion.mas_nueva(info["version"], VERSION):
+            decir(f"  Actualización automática: hay una versión nueva ({info['version']})")
+        else:
+            decir(f"  Actualización automática: al día ({origen} publica {info['version']})")
+
     decir()
     if problemas:
         decir(f"  {problemas} problema(s). El agente no va a poder cargar comprobantes.")
@@ -173,6 +191,7 @@ def _con_bandeja(app, version, origenes, ruta_log):
     """Arranca el servidor en un hilo y se queda con el icono en el principal."""
     import uvicorn
 
+    import actualizacion
     import bandeja as bandeja_mod
     import main as agente
 
@@ -233,6 +252,31 @@ def _con_bandeja(app, version, origenes, ruta_log):
         al_salir=al_salir,
     )
     print(f"  Ícono en la bandeja del sistema. Web: {_url_de_la_web(origenes) or '(sin configurar)'}")
+
+    # Momento seguro para reiniciarse: sin comprobante en pantalla y sin sesión
+    # de SISalud abierta. Las credenciales viven en memoria, así que reiniciar
+    # las borra: hacerlo con el operador trabajando le haría tipearlas de nuevo
+    # sin entender por qué.
+    def libre():
+        return agente.estado.fase == "libre" and agente.credenciales is None
+
+    def reiniciar(nueva):
+        print(f"  Actualización: reiniciando el agente para pasar a la {nueva}.")
+        icono.notificar(
+            f"Actualizando a la versión {nueva}. El ícono vuelve solo en unos "
+            "segundos.")
+        # Que el globo llegue a dibujarse antes de que el ícono desaparezca.
+        time.sleep(2)
+        icono.cerrar()
+
+    actualizacion.vigilar(
+        version=version,
+        origenes=origenes,
+        libre=libre,
+        reiniciar=reiniciar,
+        terminar=icono.terminar,
+    )
+
     icono.correr()
     return 0
 

@@ -1,9 +1,13 @@
 @echo off
 REM Compila el agente y deja el zip listo para subir al servidor.
 REM
-REM Esto es el deploy del agente entero: compilar, subir el zip, y la web le
-REM avisa sola a cada operador que hay una version nueva. No hay que ir PC por
-REM PC ni acordarse de quien quedo atrasado.
+REM Esto es el deploy del agente entero: compilar y subir el zip a la carpeta de
+REM publicacion del servidor. Cada agente instalado se entera solo y se
+REM actualiza solo (ver actualizacion.py). No hay que ir PC por PC ni acordarse
+REM de quien quedo atrasado.
+REM
+REM IMPORTANTE: subir un zip no alcanza para que las PCs se actualicen. Hay que
+REM subirle la VERSION de main.py, porque es lo unico que el agente compara.
 REM
 REM onedir y NO --onefile a proposito: arranca mas rapido (onefile se
 REM desempaqueta entero en cada arranque) y los antivirus lo marcan menos.
@@ -57,6 +61,7 @@ echo.
     --hidden-import operador ^
     --hidden-import padron ^
     --hidden-import sisalud ^
+    --hidden-import actualizacion ^
     --hidden-import bandeja ^
     --hidden-import visor ^
     --hidden-import registro ^
@@ -100,9 +105,19 @@ if exist AutoFillerAgente.zip del AutoFillerAgente.zip
 powershell -NoProfile -Command ^
   "Compress-Archive -Path 'dist\AutoFillerAgente\*' -DestinationPath 'AutoFillerAgente.zip' -Force" || goto :error
 
+REM La ficha con la version y el sha256 del zip. Es lo que el servidor contesta
+REM en /api/agente y lo que cada agente compara con lo que tiene instalado: sin
+REM ella el servidor no publica nada y nadie se actualiza.
+.venv\Scripts\python.exe publicar.py || goto :error
+
 echo.
-echo   Listo: %~dp0AutoFillerAgente.zip
-echo   Subilo al servidor para que los operadores lo descarguen.
+echo   Listo. Para que las PCs se actualicen solas, subi los DOS archivos a la
+echo   carpeta de publicacion de la VM:
+echo.
+echo     scp AutoFillerAgente.zip AutoFillerAgente.json johnny@192.168.100.16:~/Autofiller/publicacion/
+echo.
+echo   No hace falta reiniciar el contenedor: el servidor lee la carpeta en cada
+echo   consulta. Cada agente lo ve dentro de las 4 horas, o al arrancar Windows.
 echo.
 pause
 goto :eof

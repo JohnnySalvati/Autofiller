@@ -49,6 +49,14 @@ Todos los dias
 No tenes que hacer nada: el agente arranca solo con Windows, sin ventanas y sin
 pedirte nada.
 
+Tampoco tenes que instalar versiones nuevas: el agente se actualiza solo. Cuando
+hay una, la baja y se reinicia; el icono desaparece unos segundos y vuelve. Te
+avisa con un globito al lado del reloj.
+
+Nunca lo hace en el medio de algo: solo se actualiza cuando no hay ningun
+comprobante en pantalla y no estas conectado a SISalud. Casi siempre pasa al
+prender la PC, antes de que te sientes.
+
 Entra a la web de AutoFiller, subí los comprobantes, revisalos y toca "Cargar en
 SISalud". El agente hace el resto y te deja la pantalla lista para que mires y
 confirmes.
@@ -81,6 +89,10 @@ Todo eso queda guardado en un archivo, asi que tambien se puede revisar un error
 de ayer:
 
   %LOCALAPPDATA%\AutoFiller\agente.log
+
+Y si lo que fallo fue una actualizacion, el detalle esta en el de al lado:
+
+  %LOCALAPPDATA%\AutoFiller\actualizacion.log
 
 ("Abrir la carpeta", en la misma ventana, te lleva derecho ahi.)
 

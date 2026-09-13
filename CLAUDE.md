@@ -30,6 +30,15 @@ confirmar, que es el control de calidad de todo el proceso. Solo se centraliza l
   por archivo en el mismo orden), `GET /api/opciones` (combos + si hay lectura de
   fotos), y sirve `web/`. No guarda nada: cada archivo se procesa en memoria y se
   descarta. Ya no deja `decrypted.pdf` en el cwd.
+  Además publica el agente para que se actualice solo (2026-09-13): `GET /api/agente`
+  (versión, tamaño y sha256, leídos de `publicacion/AutoFillerAgente.json`) y
+  `GET /descargas/AutoFillerAgente.zip`. El zip no va adentro de la imagen ni en git:
+  `publicacion/` es un volumen que se llena por `scp`, así que subir una versión del
+  agente no es un deploy del servidor. Sin nada publicado, `/api/agente` contesta versión
+  vacía y cada agente sigue con la que tenga. **Son las dos únicas rutas fuera del
+  `auth_basic` de nginx** (el agente no tiene esas credenciales, y pedírselas sería
+  volver a meter un secreto adentro de un ejecutable que se distribuye); lo que exponen
+  es el instalador, que no lleva ningún secreto adentro.
 - `extraccion/__init__.py`: `extraer(nombre, contenido)` elige el camino según el
   archivo — PDF con texto → regex; PDF escaneado → se rasteriza la página 1 y va por
   el camino de foto; foto → QR + visión. **Nunca lanza**: todo error vuelve en
@@ -179,6 +188,46 @@ el agente".
 - `recursos.py`: resuelve el `autofiller.ico` adentro del `.exe` (`sys._MEIPASS`) o al
   lado del fuente. El ícono se empaqueta con `--add-data`, no solo como icono del
   `.exe`: es la imagen que se dibuja en la bandeja.
+
+**El agente se actualiza solo desde la 2.2 (2026-09-13)**, que es lo que hace que las
+PCs de los operadores no se queden atrás: antes una versión nueva era compilar, pasar el
+zip y confiar en que cada uno lo descomprimiera encima del anterior.
+
+- `actualizacion.py`: un hilo que cada 4 h le pregunta al servidor qué versión publicó
+  (`GET /api/agente`), y si es más nueva que `main.VERSION` baja el zip, le verifica el
+  sha256, lo descomprime en `%LOCALAPPDATA%\AutoFiller\actualizacion\nueva`, **escribe un
+  `.bat`, lo lanza suelto y se apaga**. El `.bat` espera a que el `.exe` cierre de
+  verdad, hace `robocopy` encima de la instalación y vuelve a arrancar el agente. Ese
+  rodeo es por Windows: un `.exe` corriendo está tomado y no se puede reemplazar (el
+  `_internal` de PyInstaller onedir, tampoco), así que alguien tiene que sobrevivir al
+  agente para copiar, y no puede ser el agente. El `.bat` se escribe en el momento y
+  vive afuera de la carpeta que se va a pisar; si viniera adentro del paquete, se
+  copiaría encima de sí mismo mientras cmd lo lee.
+  - **Solo actualiza con el agente libre y sin sesión de SISalud** (`fase == "libre"` y
+    `credenciales is None`). Las credenciales viven en memoria y reiniciar las borra:
+    hacerlo a mitad del día le haría tipearlas de nuevo sin entender por qué. La ventana
+    que siempre existe es el arranque de Windows. Se vuelve a chequear **después** de la
+    descarga, que es lo que tarda.
+  - El origen es `ORIGENES[0]`, el mismo del que ya se acepta que le hagan cargar
+    comprobantes: no hay una segunda configuración que pueda quedar vieja.
+  - **Las llamadas del `.bat` van por ruta completa** (`%SystemRoot%\System32\find.exe`
+    y compañía). Medido el 2026-09-13, no supuesto: con el `find` de MSYS adelante en el
+    PATH —un Git for Windows alcanza—, `tasklist | find` da "no está corriendo" siempre y
+    la copia arranca con el agente todavía abierto.
+  - **`robocopy /e /is`**: `/is` porque robocopy decide por tamaño y fecha, y dos
+    archivos distintos del mismo tamaño y la misma fecha se saltean informando "copia
+    terminada" igual (medido). `/e` y no `/mir` para no borrar lo que el operador haya
+    dejado al lado del agente.
+  - Nada de todo esto puede tirar abajo al agente: cualquier fallo queda en el log y se
+    sigue cargando comprobantes con la versión vieja. Corriendo desde el código no se
+    actualiza (no hay nada que reemplazar), solo lo avisa.
+- `publicar.py`: escribe `AutoFillerAgente.json` (versión + sha256 + tamaño) al lado del
+  zip. La versión sale de `main.py` por regex y no importándolo: importar `main` arrastra
+  FastAPI y Playwright para leer una constante.
+- Publicar una versión es `empaquetar.bat` y un `scp` de los dos archivos a
+  `~/Autofiller/publicacion/` de la VM. Sin rebuild y sin restart: el servidor lee esa
+  carpeta en cada consulta. **Lo que se compara es `VERSION`**; un zip nuevo con la misma
+  versión no actualiza a nadie.
 
 **`--noconsole` en el empaquetado no es la vuelta al error del escritorio**: ahí el
 `--noconsole` *escondía* los errores (el operador solo veía "Factura inválida"); acá
@@ -581,7 +630,23 @@ celular (no hay muestras) y dentro de un lote disparado desde la web.
   8765 está tomado: levantar el de prueba con `AUTOFILLER_PUERTO=8799
   python arrancar.py` (así aparece su propio ícono en la bandeja y no se pisa nada).
   El `.exe` compilado se diagnostica con `AutoFillerAgente.exe --probar`, que verifica
-  orígenes, Chrome, el driver de Playwright y que el ícono de la bandeja se pueda crear.
+  orígenes, Chrome, el driver de Playwright, que el ícono de la bandeja se pueda crear y
+  qué versión publica el servidor (esto último nunca cuenta como problema: el agente
+  carga comprobantes igual).
+- **La actualización automática, sin compilar nada**:
+  - El servidor: copiar el zip y el json a `publicacion/` y pegarle a `/api/agente` y a
+    `/descargas/AutoFillerAgente.zip`.
+  - La descarga y la verificación: `consultar()` y `preparar()` de
+    `agente/actualizacion.py` se llaman solas contra el servidor local. Editar la
+    versión del json a mano es la forma de simular que hay una nueva.
+  - Las decisiones (al día / servidor mudo / desde el código / ocupado / se ocupó
+    mientras bajaba / caso feliz): `_ciclo()` con `consultar`, `preparar` y `aplicar`
+    reemplazados por funciones falsas.
+  - El `.bat` que reemplaza los archivos: formatear `GUION` apuntando a carpetas de
+    prueba y con otro nombre de `.exe` (una copia de `ping.exe` sirve, y dura lo que se
+    le pida con `-n`), y correrlo con el proceso vivo para ver que espera. Probarlo con
+    `C:\Program Files\Git\usr\bin` adelante en el PATH: es el caso que rompía la espera.
+  - Lo único que esto no cubre es reemplazar un `.exe` de verdad tomado por Windows.
 - **El adjunto, sin cargar nada más**: con Chrome abierto en la pantalla y
   `--remote-debugging-port=9222`, `adjuntar_comprobante(page, nombre, contenido,
   avisos)` se puede llamar sola sobre la pantalla vacía y deja la fila en el

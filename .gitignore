@@ -20,6 +20,12 @@ agente/build/
 agente/dist/
 agente/AutoFillerAgente.spec
 agente/AutoFillerAgente.zip
+agente/AutoFillerAgente.json
+
+# El agente publicado para que las PCs se actualicen solas. En la VM esto es la
+# carpeta que se monta en el contenedor y se llena por scp; en desarrollo, la que
+# sirve el servidor local. Son binarios compilados: no van al repo.
+publicacion/
 
 # Configuracion local de Claude Code (permisos de esta PC): no va al repo.
 .claude/

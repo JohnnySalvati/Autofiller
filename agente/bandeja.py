@@ -102,7 +102,9 @@ class Bandeja:
         self._estado_texto = estado_texto
         self._ocupado = ocupado
         self._al_salir = al_salir
-        self._terminar = threading.Event()
+        # Publico: el hilo que busca actualizaciones lo espera para no quedar
+        # colgado hasta su proxima vuelta cuando el agente se esta cerrando.
+        self.terminar = threading.Event()
 
         self._icono = pystray.Icon(
             "autofiller",
@@ -145,9 +147,23 @@ class Bandeja:
                 "queda como esté en la pantalla.\n\n"
                 "¿Cerrar el agente igual?"):
             return
-        self._terminar.set()
+        self.cerrar()
+
+    def cerrar(self):
+        """Apaga el agente sin preguntar nada. Lo usa la actualizacion, que ya
+        verifico que no hay nada en juego."""
+        self.terminar.set()
         self._al_salir()
         self._icono.stop()
+
+    def notificar(self, mensaje, titulo="AutoFiller"):
+        """Globo de Windows. Es el unico lugar donde el agente habla solo, y se
+        usa para lo que el operador tiene que saber sin ir a buscarlo: que se
+        esta actualizando y que el icono va a desaparecer un rato."""
+        try:
+            self._icono.notify(mensaje, titulo)
+        except Exception:
+            print(f"{titulo}: {mensaje}")
 
     # -- ciclo de vida ------------------------------------------------------
 
@@ -163,7 +179,7 @@ class Bandeja:
         pystray no se entera solo de que el texto de un item cambio: hay que
         decirle con update_menu(), y el tooltip se reasigna a mano.
         """
-        while not self._terminar.wait(INTERVALO_ESTADO):
+        while not self.terminar.wait(INTERVALO_ESTADO):
             try:
                 self._icono.title = self._titulo()
                 self._icono.update_menu()

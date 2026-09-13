@@ -25,6 +25,17 @@ services:
       # 8002 y no 8000 ni 8001: esos ya son de Balance360 y de FactuMov. Este puerto no
       # sale nunca de la LAN; la puerta desde internet es el 443 de srv-nginx.
       - "8002:8000"
+    volumes:
+      # El agente compilado (zip + ficha con version y sha256), que cada PC baja
+      # sola para actualizarse. Va en un volumen y no adentro de la imagen: son
+      # 60 MB que no tienen nada que ver con la extraccion, cambian en otro ritmo
+      # que el codigo del servidor y no pasan por git. Subir una version nueva es
+      # un scp a esta carpeta, sin rebuild ni restart.
+      #
+      # :ro porque el servidor solo la lee. La carpeta tiene que existir ANTES
+      # del primer `up`, o Docker la crea como root y el scp despues no entra:
+      #   mkdir -p ~/Autofiller/publicacion
+      - ./publicacion:/publicacion:ro
     healthcheck:
       # Sin curl en la imagen slim, asi que el chequeo lo hace el Python que ya esta.
       # /api/opciones es el endpoint mas barato que igual ejercita la app entera: si

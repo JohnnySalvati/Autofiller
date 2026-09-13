@@ -28,7 +28,10 @@ from padron import centro_costo_del_afiliado
 from sisalud import (abrir_pantalla, adjuntar_comprobante, cargar_factura,
                      esperar_genexus)
 
-VERSION = "2.1"
+# Lo que compara la actualizacion automatica (ver actualizacion.py): subirla es
+# lo que hace que las PCs se actualicen. Un zip nuevo con la misma version no
+# actualiza a nadie.
+VERSION = "2.2"
 
 # De donde se sirve la web. El agente escucha en 127.0.0.1, asi que cualquier
 # pagina que el operador tenga abierta podria hablarle: por eso la lista de

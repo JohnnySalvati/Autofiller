@@ -14,11 +14,12 @@ No se guarda nada: cada archivo se procesa en memoria y se descarta.
 """
 
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -37,6 +38,17 @@ logging.basicConfig(
 )
 
 WEB = Path(__file__).parent / "web"
+
+# Donde se deja el agente compilado para que cada PC se actualice sola. En la VM
+# es un volumen montado (ver docker-compose.prod.yml); en desarrollo, la carpeta
+# publicacion/ del repo. La misma expresion sirve para los dos: adentro de la
+# imagen el codigo vive en /app, asi que /app/.. es / y esto da /publicacion.
+PUBLICACION = Path(os.environ.get(
+    "AUTOFILLER_PUBLICACION",
+    Path(__file__).resolve().parent.parent / "publicacion"))
+
+ZIP_AGENTE = "AutoFillerAgente.zip"
+FICHA_AGENTE = "AutoFillerAgente.json"
 
 # Tope por archivo. Una foto de celular ronda los 3-5 MB; 25 deja margen sin
 # permitir que una subida gigante bloquee el servidor.
@@ -108,6 +120,54 @@ async def api_extraer(archivos: list[UploadFile]):
         # tanda. En un hilo aparte, cada pedido avanza por su cuenta.
         resultados.append(await asyncio.to_thread(extraer, nombre, contenido))
     return resultados
+
+
+class Agente(BaseModel):
+    version: str = ""
+    url: str = ""
+    tamano: int = 0
+    sha256: str = ""
+
+
+@app.get("/api/agente", response_model=Agente)
+def agente():
+    """Que version del agente publica este servidor, para que se actualice solo.
+
+    Devolver la version vacia es una respuesta valida y quiere decir "no hay nada
+    publicado": el agente sigue andando con la version que tenga. Que el
+    servidor todavia no tenga el zip no puede ser un error del lado del operador.
+
+    Esto y /descargas/ son los dos unicos endpoints que en produccion quedan
+    afuera del auth_basic de nginx, porque el agente no tiene esas credenciales
+    (ver docs/DEPLOYMENT.md § 3). Lo que se expone es el instalador, que no lleva
+    ningun secreto adentro: las credenciales de SISalud las tipea el operador y
+    la clave de lectura vive solo en este servidor.
+    """
+    zip_ = PUBLICACION / ZIP_AGENTE
+    ficha = PUBLICACION / FICHA_AGENTE
+    if not zip_.exists() or not ficha.exists():
+        return Agente()
+    try:
+        datos = json.loads(ficha.read_text(encoding="utf-8"))
+    except Exception:
+        logging.warning("%s no se puede leer: no se publica ningún agente", ficha)
+        return Agente()
+    return Agente(
+        version=str(datos.get("version", "")),
+        url="/descargas/" + ZIP_AGENTE,
+        tamano=zip_.stat().st_size,
+        sha256=str(datos.get("sha256", "")),
+    )
+
+
+@app.get("/descargas/" + ZIP_AGENTE)
+def descargar_agente():
+    """El zip del agente. Lo baja el agente mismo al actualizarse, y sirve
+    tambien para instalarlo por primera vez en una PC nueva."""
+    zip_ = PUBLICACION / ZIP_AGENTE
+    if not zip_.exists():
+        raise HTTPException(404, "Este servidor no publica ningún agente.")
+    return FileResponse(zip_, media_type="application/zip", filename=ZIP_AGENTE)
 
 
 @app.get("/")

@@ -59,6 +59,8 @@ git clone https://github.com/JohnnySalvati/Autofiller.git
 cd Autofiller
 cp .env.example .env
 nano .env            # al menos una de las dos claves de lectura (ver abajo)
+mkdir -p publicacion # de donde se sirve el agente (§ 5). Antes del up: si la crea
+                     # Docker, queda de root y el scp del agente no entra.
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml logs -f app
 ```
@@ -105,6 +107,32 @@ certificado todavía no existe. Certbot reescribe el archivo después.
 server {
     listen 80;
     server_name autofiller.insoft.net.ar;
+
+    # Las DOS únicas rutas sin auth_basic, y es a propósito: son por donde el
+    # agente de cada PC se entera de que hay una versión nueva y se la baja, y el
+    # agente no tiene esas credenciales (pedírselas sería volver a meter un
+    # secreto adentro de un ejecutable que se distribuye).
+    #
+    # Lo que queda expuesto es el instalador del agente, que no lleva ningún
+    # secreto adentro: las credenciales de SISalud las tipea el operador y la
+    # clave de lectura vive en el .env de la VM. El auth_basic sigue tapando
+    # /api/extraer, que es lo que protege la cuota de lectura de comprobantes.
+    #
+    # Van con `=` (coincidencia exacta), que en nginx tiene prioridad sobre el
+    # prefijo `location /`: no abren nada más que estas dos direcciones.
+    location = /api/agente {
+        proxy_pass http://192.168.100.16:8002;
+        proxy_set_header Host $host;
+    }
+
+    location = /descargas/AutoFillerAgente.zip {
+        proxy_pass http://192.168.100.16:8002;
+        proxy_set_header Host $host;
+        # 60 MB por una conexión de oficina pueden pasar del minuto, y el default
+        # de proxy_read_timeout es 60 s: sin esto la descarga se corta por la
+        # mitad y el agente la descarta por el sha256, una y otra vez.
+        proxy_read_timeout 300s;
+    }
 
     location / {
         # El auth_basic va ACÁ ADENTRO y no a nivel server, y no es cuestión de estilo:
@@ -197,15 +225,18 @@ o el operador se va a encontrar con «No se detecta el agente».
 
 No necesita Python ni pip: es un `.exe`.
 
-1. Pasarle `AutoFillerAgente.zip` (50 MB) y que lo descomprima donde quiera que viva,
-   por ejemplo `C:\AutoFiller`.
+1. Que baje `AutoFillerAgente.zip` (60 MB) de
+   `https://autofiller.insoft.net.ar/descargas/AutoFillerAgente.zip` —esa dirección no
+   pide usuario ni contraseña— y lo descomprima donde quiera que viva, por ejemplo
+   `C:\AutoFiller`. Es la única vez que hay que hacer esto: de ahí en más se actualiza
+   solo.
 2. Doble clic en **`configurar.bat`**. Deja `AUTOFILLER_ORIGENES` como variable de
    usuario y crea el acceso directo en la carpeta Inicio, para que el agente arranque
    con Windows. Acepta el origen como argumento si hay que apuntar a otro lado.
-3. Doble clic en **`AutoFillerAgente.exe`**. La ventana de consola que se abre es la
-   señal de que está andando: va a la vista a propósito, porque es donde se ven los
-   errores. El `.exe` viejo se compilaba con `--noconsole` y el operador solo veía
-   «Factura inválida».
+3. Doble clic en **`AutoFillerAgente.exe`**. No se abre ninguna ventana: queda como
+   ícono al lado del reloj, atrás de la flechita de «Iconos ocultos». Lo que antes se
+   veía en la consola está en `%LOCALAPPDATA%\AutoFiller\agente.log`, y el menú del
+   ícono lo muestra en vivo («Ver la actividad»).
 
 **Para verificar la instalación sin cargar un comprobante de verdad**:
 `AutoFillerAgente.exe --probar`. Ejercita las dos cosas que pueden faltar en una PC
@@ -227,10 +258,57 @@ PyInstaller no se lo lleva solo — sin eso el agente compila bien y falla reci�
 intentar abrir Chrome, en la PC del operador. Los navegadores que Playwright descarga
 siguen sin hacer falta: el agente se engancha por CDP al Chrome que ya está.
 
-> **Pendiente**: servir el zip desde este mismo servidor y que la web compare la versión
-> que devuelve `/api/salud` del agente contra la que espera el servidor, avisando cuando
-> hay una nueva. Con eso el deploy del agente es compilar, subir el zip, y cada operador
-> se entera solo. Hoy hay que pasarles el zip a mano.
+### Publicar una versión nueva del agente
+
+Desde la 2.2 **el agente se actualiza solo**: no hay que ir PC por PC ni pasar el zip por
+mail. Subir una versión es esto:
+
+```bat
+agente\empaquetar.bat
+```
+
+que compila, corre el autodiagnóstico, arma `AutoFillerAgente.zip` y escribe
+`AutoFillerAgente.json` (versión + sha256). Y después, a la VM:
+
+```bash
+scp AutoFillerAgente.zip AutoFillerAgente.json johnny@192.168.100.16:~/Autofiller/publicacion/
+```
+
+Eso es todo: **sin rebuild y sin restart**, porque el servidor lee esa carpeta en cada
+consulta. Cada agente instalado lo ve dentro de las 4 horas, o antes si la PC se reinicia.
+
+- La carpeta `publicacion/` está montada en el contenedor como `/publicacion` (ver
+  `docker-compose.prod.yml`) y **tiene que existir antes del primer `up`**, o Docker la
+  crea como root y el `scp` después rebota.
+- **Lo que se compara es `VERSION` en `agente/main.py`.** Un zip nuevo con la misma
+  versión no actualiza a nadie: para el agente instalado no hay nada nuevo.
+- Verificar que quedó publicado, desde afuera y sin credenciales (tienen que ser las dos
+  únicas rutas que contestan sin el usuario y la contraseña):
+
+  ```bash
+  curl -s https://autofiller.insoft.net.ar/api/agente
+  curl -sI https://autofiller.insoft.net.ar/descargas/AutoFillerAgente.zip | head -3
+  ```
+
+**Cómo se aplica, en la PC del operador** (`agente/actualizacion.py`): baja el zip,
+verifica el sha256, lo descomprime en `%LOCALAPPDATA%\AutoFiller\actualizacion`, deja
+andando un `.bat` suelto y se apaga; el `.bat` espera a que el `.exe` cierre —Windows no
+deja reemplazar un ejecutable tomado—, copia encima de la instalación y vuelve a
+arrancar el agente. El ícono de la bandeja desaparece unos segundos y vuelve con la
+versión nueva. Queda registrado en `%LOCALAPPDATA%\AutoFiller\actualizacion.log`.
+
+**Nunca se actualiza a mitad de camino**: solo con el agente libre y sin sesión de
+SISalud abierta (reiniciar borra las credenciales, que viven en memoria). La ventana que
+siempre existe es el arranque de Windows.
+
+> **El salto a la 2.2 hay que hacerlo a mano, una sola vez.** Los agentes instalados hoy
+> son 2.1 y no traen la actualización automática: no hay nada que les avise. Hay que
+> pasarles el zip de la 2.2 (o el link de descarga) y que lo descompriman encima, como
+> siempre. De esa en más, se actualizan solos.
+
+**Marcha atrás**: publicar de nuevo el zip y el json de la versión anterior no alcanza
+—las PCs solo van hacia adelante—, así que hay que subir el arreglo como versión nueva.
+Para volver atrás en una PC puntual, descomprimirle el zip viejo encima a mano.
 
 ---
 
