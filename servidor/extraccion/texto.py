@@ -104,8 +104,14 @@ def extraer_descripcion(text):
 
 
 def codigo_arca(text):
-    """Codigo de comprobante de ARCA ('011' -> '11')."""
-    match = re.search(r"COD\.?\s*0*(\d+)", text, re.IGNORECASE)
+    """Codigo de comprobante de ARCA ('011' -> '11').
+
+    El punto de "COD." es opcional y admite coma: sobre una foto, el OCR lee
+    "COD, 011" bastante seguido (FOTO.pdf, 2026-09-13). Sin esto el tipo de
+    comprobante queda sin cargar, que es de los cuatro datos que SISalud
+    necesita si o si, y el comprobante no se puede cargar.
+    """
+    match = re.search(r"COD[.,]?\s*0*(\d+)", text, re.IGNORECASE)
     if match:
         return match.group(1)
     match = re.search(r"Codigo\s*nº\s*(\d+)", text, re.IGNORECASE)

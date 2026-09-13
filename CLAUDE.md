@@ -299,6 +299,16 @@ Los `id` de los combos y sus `value` — usar siempre `select_option(value=...)`
 
 Centros de costo confirmados por el usuario para cuatro de ellas: SANFELIU→Olavarría, ANTOLA→Mina Aguilar, ALCIBAR→Tandil, HIDALGO→Barker. Fueron elegidas a propósito como casos especiales, no son una muestra representativa.
 
+**`FOTO.pdf` (2026-09-13) es la primera foto real**, y no es un PDF de ARCA
+aunque la extensión lo diga: es una foto de celular pasada por **CamScanner**,
+que arma un PDF de 2 páginas sin capa de texto, cada una con la foto embebida a
+página completa (2108×3114 y 2160×3512) más la banda "Escaneado con
+CamScanner". La página 1 es la factura y la **página 2 es la planilla de
+asistencia manuscrita** — rasterizar solo la primera, que es lo que hace
+`extraer()`, es lo correcto. Que el operador reenvíe la foto como PDF de
+CamScanner en vez de como JPG es lo esperable en WhatsApp, así que el camino
+`pdf-imagen-*` es el que va a recibir la mayoría de las fotos, no el `foto-*`.
+
 ## Problemas de la evaluación 2026-09 — estado
 
 Resueltos por la app web (los demás siguen presentes en `AutoFiller.py`, que se
@@ -448,8 +458,35 @@ Enfoque **híbrido QR + visión**, en `servidor/extraccion/`:
 - Un PDF **escaneado** (sin capa de texto) entra por este mismo camino: se rasteriza
   la primera página con `pypdfium2` y se trata como foto.
 
-Sin probar todavía contra fotos reales de celular: no hay muestras. Las 63 de
-`samples/` son todas PDF nativos.
+**Probado contra la primera foto real el 2026-09-13** (`samples/FOTO.pdf`, ver
+"Muestras"). Resultado: los doce campos salieron correctos verificados contra la
+imagen, con dos hallazgos.
+
+- **El QR no se lee, y no es rescatable.** CamScanner binariza y afila la foto,
+  y el QR de ARCA es denso (el payload es largo): los módulos quedan fusionados
+  a ~2,8 px cada uno. `zxing-cpp` no lo saca de la imagen embebida a resolución
+  completa, ni rasterizando a 150/200/300 dpi, ni recortando la zona y
+  ampliándola ×2, ×3 o ×4. **La premisa de que el QR trae los datos fiscales
+  exactos y gratis no se cumple sobre fotos**: en este caso los doce campos
+  salieron del OCR solo, y salieron bien (CUIT, punto de venta, número, CAE,
+  importe y fechas, todos verificados contra la imagen). El aviso de "no se pudo
+  leer el QR" que la web ya muestra pasa entonces a ser el caso normal de una
+  foto, no la excepción.
+- **`COD, 011`**: el OCR lee la coma en vez del punto, y el regex de
+  `codigo_arca()` pedía `COD\.?`. Dejaba el tipo de comprobante sin cargar, que
+  es de los cuatro que SISalud necesita sí o sí — o sea que el comprobante no se
+  podía cargar. Arreglado el 2026-09-13 (`COD[.,]?`), sin cambios en las 63
+  muestras de PDF.
+
+Lo que esta muestra **no** prueba: una foto sacada de frente y sin pasar por un
+escaneador de documentos (ángulo, sombra y foco de verdad). CamScanner ya
+endereza y aplana.
+
+Un detalle que no es del pipeline: la factura dice `DNI: 57.509.48`, siete
+dígitos — lo escribió mal la prestadora, no lo perdió el OCR (verificado en la
+imagen a resolución completa). `identificacion()` lo descarta, la consulta al
+padrón no sale y el centro de costos cae a la aproximación por domicilio, que da
+SALTA. El degradado funcionó como estaba previsto.
 
 **IMPLEMENTADO (2026-09-10): OCR clásico como motor por defecto, modelo de respaldo.**
 Google Cloud Vision regala 1000 páginas por mes, que al volumen de AOMAOSAM
