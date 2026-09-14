@@ -169,6 +169,32 @@ def buscar(text, patron, bandera=0):
     return match.group(1).strip() if match else None
 
 
+# El aviso de cada campo que puede no aparecer. Estan en un diccionario y no
+# sueltos porque cuando el modelo de vision rellena lo que los regex no
+# entendieron (ver _completar_con_vision) hay que rehacer la lista: el aviso de
+# un campo que ya se lleno seria mentira.
+AVISOS_POR_CAMPO = {
+    "fecha_vencimiento": (
+        "La factura no trae el período facturado ('Hasta:'). Quedaron sin "
+        "cargar el vencimiento y el devengamiento."
+    ),
+    "domicilio": (
+        "No se encontró el domicilio comercial del emisor: el Centro de "
+        "Costos queda en CENTRAL y lo elegís vos."
+    ),
+    "importe": "No se encontró el 'Importe Total' en la factura.",
+    "descripcion": (
+        "No se encontró el detalle facturado: la descripción queda vacía y "
+        "la tenés que escribir vos."
+    ),
+}
+
+
+def avisos_de_campos(datos):
+    """Los avisos que corresponden a los campos vacios de `datos`."""
+    return [texto for campo, texto in AVISOS_POR_CAMPO.items() if not datos.get(campo)]
+
+
 def datos_desde_texto(text):
     """(dict de campos, avisos) a partir del texto de la factura de ARCA."""
     avisos = []
@@ -184,34 +210,13 @@ def datos_desde_texto(text):
     # ARCA rotula el periodo facturado como 'Desde:' / 'Hasta:'. El escritorio
     # usa 'Hasta:' tanto de vencimiento como de devengamiento.
     fecha_hasta = buscar(text, r"Hasta:\s*(\d{2}/\d{2}/\d{4})")
-    if not fecha_hasta:
-        avisos.append(
-            "La factura no trae el período facturado ('Hasta:'). Quedaron sin "
-            "cargar el vencimiento y el devengamiento."
-        )
-
     domicilio = extraer_domicilio_comercial(text)
-    if not domicilio:
-        avisos.append(
-            "No se encontró el domicilio comercial del emisor: el Centro de "
-            "Costos queda en CENTRAL y lo elegís vos."
-        )
-
     importe = buscar(text, REGEX_IMPORTE, re.IGNORECASE)
-    if not importe:
-        avisos.append("No se encontró el 'Importe Total' en la factura.")
-
     descripcion = extraer_descripcion(text)
-    if not descripcion:
-        avisos.append(
-            "No se encontró el detalle facturado: la descripción queda vacía y "
-            "la tenés que escribir vos."
-        )
-
     punto_venta, nro_factura = punto_venta_y_numero(text)
     centro_costo_nombre, centro_costo = centro_costo_de_domicilio(domicilio)
 
-    return {
+    datos = {
         "cuit": cuit_emisor(text),
         "tipo_comprobante": tipo_comprobante,
         "punto_venta": punto_venta,
@@ -227,7 +232,8 @@ def datos_desde_texto(text):
         "provincia": provincia_de_domicilio(domicilio),
         "centro_costo": centro_costo,
         "centro_costo_nombre": centro_costo_nombre,
-    }, avisos
+    }
+    return datos, avisos + avisos_de_campos(datos)
 
 
 def parece_factura_arca(text):

@@ -57,6 +57,22 @@ CENTROS_COSTO = {
 # sin avisar, asi que se avisa cual falta antes de cargar.
 CAMPOS_OBLIGATORIOS = ("cuit", "tipo_comprobante", "punto_venta", "nro_factura")
 
+# Como se nombra cada campo cuando hay que hablarle al operador de el.
+ETIQUETAS_CAMPO = {
+    "cuit": "CUIT del emisor",
+    "tipo_comprobante": "tipo de comprobante",
+    "punto_venta": "punto de venta",
+    "nro_factura": "número de comprobante",
+    "fecha_emision": "fecha de emisión",
+    "fecha_vencimiento": "vencimiento",
+    "fecha_devengamiento": "devengamiento",
+    "cae": "CAE",
+    "descripcion": "descripción del detalle",
+    "importe": "importe",
+    "domicilio": "domicilio del emisor",
+    "centro_costo": "centro de costos",
+}
+
 # De esos cuatro, el unico sin el cual no hay NADA que cargar: el agente elige el
 # prestador buscandolo por CUIT en el prompt de entidades, y sin prestador la
 # pantalla no acepta ningun otro dato. Los otros tres se cargan igual con lo que

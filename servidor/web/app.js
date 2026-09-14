@@ -446,6 +446,8 @@ function dibujarItem(item) {
         origen.style.marginTop = "12px";
         origen.textContent = {
           "pdf-texto": "Leído del texto del PDF.",
+          "pdf-texto-vision": "El PDF no tiene el formato de ARCA: lo que no se " +
+            "pudo leer del texto lo completó el modelo de visión.",
           "pdf-imagen-ocr": "El PDF venía escaneado: se leyó como imagen, con OCR.",
           "pdf-imagen-vision": "El PDF venía escaneado: se leyó como imagen, con el modelo.",
           "foto-ocr": "Leído de la foto (QR de ARCA + OCR).",

@@ -305,7 +305,29 @@ llega vacío.
 - En la web, `estadoLeido()` se recalcula con cada campo que el operador
   completa, y los que faltan van marcados en ámbar en el formulario.
 
-Sobre las 65 muestras: **0 quedan sin leer** (antes 4) y 2 se cargan sin el tipo.
+Sobre las 65 muestras: **0 quedan sin leer** (antes 4).
+
+### El modelo de visión como respaldo del PDF con texto (2026-09-14)
+
+Decisión del usuario. Los regex son de ARCA y solo entienden el formato de ARCA;
+un comprobante de talonario preimpreso los deja casi vacíos aunque el PDF tenga
+capa de texto. Cuando eso pasa, `extraer()` rasteriza la primera página y se la
+manda al **modelo de visión** —no al OCR, que le pasaría a esos mismos regex un
+texto con los mismos rótulos raros—.
+
+- Dispara `_regex_no_entendieron()`: falta alguno de los `CAMPOS_OBLIGATORIOS`, o
+  quedaron vacíos a la vez el detalle y el importe. Una factura de ARCA de verdad
+  no da ninguna de las dos señales: sobre las muestras dispara en 2 de 65 (3 %).
+- **Lo que salió del texto manda**: es exacto. El modelo solo llena los huecos, y
+  se avisa cuáles para que el operador los mire. El `origen` queda en
+  `pdf-texto-vision` y la web lo dice.
+- Si el modelo falla o no hay `ANTHROPIC_API_KEY`, queda lo que leyó el texto:
+  un fallo del respaldo no puede convertir media lectura en ninguna. Sin la clave
+  configurada, la extracción es byte a byte la de antes (verificado).
+- Medido el 2026-09-14 con `claude-opus-5`: USD 0,022 y 0,030 por comprobante, o
+  sea ~USD 0,07 por cada 100 comprobantes al 3 % que dispara. En las dos muestras
+  salieron bien los cinco campos que faltaban, incluido el **DNI**, que además
+  destraba la consulta al padrón y con ella el centro de costos real.
 
 ### `AutoFiller.py` (escritorio) — congelado
 
@@ -392,10 +414,10 @@ Centros de costo confirmados por el usuario para cuatro de ellas: SANFELIU→Ola
 REDONDEL 71082.pdf` son facturas de talonario preimpreso, con los datos en otro
 orden y otros rótulos (`Comprobante N° : 00003-00019640`, `Importe TOTAL $:
 1058944.79` con punto decimal, `Prestaciones correspondientes al mes de JULIO -
-2026` en vez de `Desde:`/`Hasta:`). Se leen casi enteras, pero ninguna trae el
-`COD. nnn` de ARCA, así que el **tipo de comprobante** no sale de ahí: las dos
-dicen FACTURA y REDONDEL además muestra la letra `C` suelta. Deducirlo de eso es
-una decisión pendiente del usuario; por ahora el tipo lo elige el operador.
+2026` en vez de `Desde:`/`Hasta:`). Son las que disparan el respaldo con el
+modelo de visión (ver abajo). Lo que igual queda sin leer en las dos es el
+**período facturado**: no lo tienen en ninguna forma que el modelo reconozca
+como `Hasta:`, así que el vencimiento y el devengamiento los pone el operador.
 
 **`FOTO.pdf` (2026-09-13) es la primera foto real**, y no es un PDF de ARCA
 aunque la extensión lo diga: es una foto de celular pasada por **CamScanner**,

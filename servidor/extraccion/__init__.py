@@ -21,9 +21,9 @@ from datetime import date
 from . import ocr
 from .afiliado import identificacion
 from .centro_costo import centro_costo_de_domicilio, provincia_de_domicilio
-from .modelo import Factura, Resultado
+from .modelo import CAMPOS_OBLIGATORIOS, ETIQUETAS_CAMPO, Factura, Resultado
 from .qr import campos_desde_qr, leer_qr
-from .texto import datos_desde_texto, parece_factura_arca
+from .texto import AVISOS_POR_CAMPO, avisos_de_campos, datos_desde_texto, parece_factura_arca
 from .vision import VisionNoDisponible, disponible as vision_disponible, leer_comprobante
 
 registro = logging.getLogger(__name__)
@@ -201,6 +201,51 @@ def _datos_desde_imagen(imagen):
     return datos, avisos, motor
 
 
+def _regex_no_entendieron(datos):
+    """Si el PDF tiene texto pero los regex de ARCA no le sacaron lo que hace falta.
+
+    Dos senales, y cualquiera alcanza: que falte alguno de los campos que
+    SISalud necesita si o si, o que hayan quedado vacios a la vez el detalle y
+    el importe. Una factura de ARCA de verdad no da ninguna de las dos; cuando
+    se dan es porque el comprobante esta impreso de otra forma (talonario
+    preimpreso, ver BLANQUERNA y REDONDEL en samples/).
+    """
+    if any(not datos.get(campo) for campo in CAMPOS_OBLIGATORIOS):
+        return True
+    return not datos.get("descripcion") and not datos.get("importe")
+
+
+def _completar_con_vision(contenido, datos, avisos):
+    """(datos, avisos, uso) rellenando con el modelo lo que los regex no sacaron.
+
+    Los regex son de ARCA y solo entienden el formato de ARCA. El modelo lee la
+    imagen sin depender del layout, asi que es el respaldo natural para un
+    comprobante impreso de otra forma -- y no el OCR, que le pasaria a esos
+    mismos regex un texto con los mismos rotulos raros.
+
+    Lo que SI salio del texto manda: es exacto, mientras que el modelo puede
+    equivocarse. El modelo solo llena los huecos, y se avisa cuales para que el
+    operador los mire antes de confirmar.
+    """
+    leidos, _ = _datos_desde_vision(_primera_pagina_como_imagen(contenido))
+    rellenados = [c for c in leidos if leidos.get(c) and not datos.get(c)]
+    if not rellenados:
+        return datos, avisos, False
+
+    for campo in rellenados:
+        datos[campo] = leidos[campo]
+
+    # Los avisos de campo se rehacen: el de un campo que el modelo acaba de
+    # llenar ya no es cierto.
+    avisos = [a for a in avisos if a not in AVISOS_POR_CAMPO.values()]
+    avisos.append(
+        "El comprobante no tiene el formato de ARCA, así que "
+        + ", ".join(ETIQUETAS_CAMPO[c] for c in rellenados if c in ETIQUETAS_CAMPO)
+        + " los leyó el modelo de visión y no los regex. Revisalos antes de confirmar."
+    )
+    return datos, avisos + avisos_de_campos(datos), True
+
+
 def extraer(nombre, contenido):
     """Resultado de la extraccion para un archivo. Nunca lanza."""
     resultado = Resultado(archivo=nombre)
@@ -216,6 +261,15 @@ def extraer(nombre, contenido):
             if parece_factura_arca(texto):
                 datos, avisos = datos_desde_texto(texto)
                 resultado.origen = "pdf-texto"
+                if _regex_no_entendieron(datos) and vision_disponible():
+                    try:
+                        datos, avisos, uso = _completar_con_vision(contenido, datos, avisos)
+                        if uso:
+                            resultado.origen = "pdf-texto-vision"
+                    except Exception as e:
+                        # Lo leido del texto vale igual: un fallo del respaldo no
+                        # puede convertir media lectura en ninguna.
+                        registro.warning("El respaldo con el modelo falló: %s", e)
             else:
                 # PDF sin texto: es un escaneo, va por el mismo camino que la foto.
                 datos, avisos, motor = _datos_desde_imagen(_primera_pagina_como_imagen(contenido))
