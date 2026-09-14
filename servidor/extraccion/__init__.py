@@ -240,6 +240,13 @@ def extraer(nombre, contenido):
     resultado.factura = Factura(**datos)
     resultado.avisos = avisos
 
+    # Que falte alguno de los cuatro campos que SISalud necesita NO deja al
+    # comprobante afuera: lo leido sirve igual. Hay facturas viejas, sin el
+    # formato de ARCA, donde el tipo o el numero no figuran de una forma
+    # reconocible, y devolverlas como "no se pudo leer" obligaba a tipear de
+    # cero un comprobante del que ya teniamos el CUIT, las fechas, el importe y
+    # el detalle. Se avisa que falta y el operador lo completa: aca antes de
+    # cargar, o en la pantalla, que es donde tiene la factura a la vista.
     faltantes = resultado.factura.faltantes()
     if faltantes:
         etiquetas = {
@@ -248,9 +255,18 @@ def extraer(nombre, contenido):
             "punto_venta": "punto de venta",
             "nro_factura": "número de comprobante",
         }
-        resultado.error = (
-            "Faltan datos que SISalud necesita sí o sí: "
-            + ", ".join(etiquetas[c] for c in faltantes)
-            + ". Completalos abajo o cargá el comprobante a mano."
+        nombrados = ", ".join(etiquetas[c] for c in faltantes)
+        cierre = (
+            "completalo acá abajo, o cargá el comprobante igual y completalo en "
+            "la pantalla."
+            if resultado.factura.cargable() else
+            # Sin CUIT el agente no puede ni elegir el prestador, asi que no hay
+            # nada que cargar hasta que alguien lo escriba.
+            "sin el CUIT del emisor no se puede elegir el prestador, así que "
+            "escribilo acá abajo antes de cargar."
+        )
+        resultado.avisos.append(
+            f"No se pudo leer: {nombrados}. SISalud lo necesita para aceptar la "
+            f"cabecera: {cierre}"
         )
     return resultado

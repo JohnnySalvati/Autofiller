@@ -50,6 +50,11 @@ const RESOLUCION_A_ESTADO = {
 // Los estados desde los que todavía tiene sentido mandar el comprobante a SISalud.
 const CARGABLES = new Set(["listo", "revisar", "pendiente"]);
 
+// Los estados que se recalculan cuando el operador edita un campo. Los de la
+// carga ("cargando", "confirmado", ...) cuentan lo que pasó en SISalud y no
+// tienen que volver atrás porque alguien toque el formulario.
+const RELEIBLES = new Set(["listo", "revisar", "problema"]);
+
 const estado = {
   opciones: null,
   agenteVivo: false,
@@ -220,14 +225,55 @@ async function leerComprobante(item, archivo) {
     item.avisos = resultado.avisos || [];
     item.error = resultado.error || "";
     item.factura = resultado.factura;
-    item.estado = resultado.error ? "problema"
-                : item.avisos.length ? "revisar" : "listo";
+    item.estado = item.error ? "problema" : estadoLeido(item);
   } catch (e) {
     item.estado = "problema";
     item.error = "No se pudo leer el comprobante: " + e.message;
   }
 
   dibujarCola();
+}
+
+/** Los campos que SISalud necesita y la factura todavía no tiene.
+ *
+ * La lista la manda el servidor en /api/opciones: la regla vive en modelo.py y
+ * no repetida acá, para que agregar o sacar un campo sea un solo cambio.
+ */
+function faltantes(factura) {
+  const obligatorios = (estado.opciones && estado.opciones.campos_obligatorios) || [];
+  if (!factura) return obligatorios.slice();
+  return obligatorios.filter((campo) => !String(factura[campo] || "").trim());
+}
+
+/** Si falta lo único sin lo cual no hay nada que cargar (el CUIT del emisor:
+ *  el agente elige el prestador buscándolo por CUIT). */
+function faltaLoImprescindible(factura) {
+  const clave = (estado.opciones && estado.opciones.campo_imprescindible) || "cuit";
+  return !factura || !String(factura[clave] || "").trim();
+}
+
+/** Estado de la fila según lo que la factura tiene AHORA.
+ *
+ * Que falte el tipo o el número no deja el comprobante afuera: se carga con lo
+ * que hay y el operador completa el resto en la pantalla, que es donde tiene la
+ * factura a la vista. Y como se recalcula, completar el campo acá abajo alcanza
+ * para que la fila deje de estar trabada: antes el estado se fijaba al leer y
+ * no cambiaba nunca, así que un comprobante marcado "No se pudo leer" seguía
+ * marcado aunque el operador ya lo hubiera completado.
+ */
+function estadoLeido(item) {
+  if (faltaLoImprescindible(item.factura)) return "problema";
+  return (item.avisos.length || faltantes(item.factura).length) ? "revisar" : "listo";
+}
+
+/** Recalcula la fila después de que el operador completó un campo a mano. */
+function revisarCompletitud(item) {
+  if (item.error || !RELEIBLES.has(item.estado)) return;
+  const nuevo = estadoLeido(item);
+  if (nuevo !== item.estado) {
+    item.estado = nuevo;
+    dibujarCola();
+  }
 }
 
 /** El archivo en base64, para mandárselo al agente adentro del JSON.
@@ -252,6 +298,9 @@ async function aBase64(archivo) {
 function crearCampo(item, campo) {
   const etiqueta = document.createElement("label");
   if (campo.ancho) etiqueta.classList.add("completo");
+  // Los que SISalud necesita y no se pudieron leer van marcados: es lo primero
+  // que el operador tiene que mirar al abrir un comprobante incompleto.
+  if (faltantes(item.factura).includes(campo.clave)) etiqueta.classList.add("falta");
   etiqueta.append(campo.etiqueta);
 
   let control;
@@ -282,6 +331,7 @@ function crearCampo(item, campo) {
   });
   control.addEventListener("change", () => {
     item.factura[campo.clave] = control.value;
+    revisarCompletitud(item);
   });
   etiqueta.appendChild(control);
 

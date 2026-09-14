@@ -54,8 +54,15 @@ CENTROS_COSTO = {
 }
 
 # Lo minimo para que la pantalla acepte la cabecera. Sin esto GeneXus la descarta
-# sin avisar, asi que se marca el comprobante como no leido antes de intentarlo.
+# sin avisar, asi que se avisa cual falta antes de cargar.
 CAMPOS_OBLIGATORIOS = ("cuit", "tipo_comprobante", "punto_venta", "nro_factura")
+
+# De esos cuatro, el unico sin el cual no hay NADA que cargar: el agente elige el
+# prestador buscandolo por CUIT en el prompt de entidades, y sin prestador la
+# pantalla no acepta ningun otro dato. Los otros tres se cargan igual con lo que
+# haya y los completa el operador, que tiene la factura a la vista: eso vale mas
+# que devolverle el comprobante entero para que lo tipee de cero.
+CAMPO_IMPRESCINDIBLE = "cuit"
 
 
 class Factura(BaseModel):
@@ -95,7 +102,8 @@ class Factura(BaseModel):
         return [c for c in CAMPOS_OBLIGATORIOS if not getattr(self, c)]
 
     def cargable(self) -> bool:
-        return not self.faltantes()
+        """Si tiene sentido mandarlo al agente, aunque falte completar campos."""
+        return bool(getattr(self, CAMPO_IMPRESCINDIBLE))
 
 
 class Resultado(BaseModel):

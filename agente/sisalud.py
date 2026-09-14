@@ -234,6 +234,18 @@ async def elegir_prestador(page, cuit, avisos):
     si la busqueda devuelve varias entidades, el primer link no tiene por que ser
     la correcta.
     """
+    if not cuit:
+        # Todo lo demas de la cabecera se puede cargar incompleto y completarlo
+        # en la pantalla; el CUIT no, porque es con lo que se busca al prestador
+        # y sin prestador la pantalla no acepta nada.
+        avisar(
+            avisos,
+            "El comprobante no trae el CUIT del emisor, y el prestador se elige "
+            "buscándolo por CUIT.\nCargá este comprobante a mano.",
+            accion="Falta el CUIT del emisor: cargalo a mano.",
+        )
+        return False
+
     await esperar_genexus(page)
     await page.locator("#PROMPTIMGENTIDAD").click()
 

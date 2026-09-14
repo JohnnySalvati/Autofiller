@@ -344,6 +344,11 @@ a { color: var(--verde); }
 }
 .campos .completo { grid-column: 1 / -1; }
 
+/* Campo que SISalud necesita y el comprobante no trajo: lo completa el operador. */
+.campos label.falta { color: var(--ambar); }
+.campos label.falta input,
+.campos label.falta select { border-color: var(--ambar); }
+
 .contador { font-size: 12px; color: var(--tenue); font-weight: 400; }
 .contador.pasado { color: var(--rojo); font-weight: 600; }
 

@@ -19,8 +19,24 @@ from .modelo import TIPOS_COMPROBANTE
 
 # ARCA escribe el total sin separador de miles y con coma decimal ("161023,60"),
 # verificado sobre las 63 muestras. El punto opcional cubre los emisores que si
-# lo ponen.
-REGEX_IMPORTE = r"Importe Total:\s*\$?\s*([\d,]+(?:\.\d+)?)"
+# lo ponen. Se busca sin distinguir mayusculas: hay emisores que rotulan la
+# linea "Importe total" (HUEPIL), y con el regex sensible el importe quedaba sin
+# cargar en una factura que por lo demas se leia entera.
+#
+# El "$" tiene que estar en el MISMO renglon que el rotulo, y es lo unico que
+# distingue el total de verdad de la columna "Importe Total" del detalle, que
+# muchas facturas traen tambien y con separador de miles ("Importe Total:\n
+# $161.023,60"). El numero, en cambio, puede caer en el renglon siguiente: el
+# OCR siempre parte ahi ("Importe Total: $\n161023,60"). Pidiendo el $ pegado al
+# rotulo, ROJAS 712 deja de leer 161.023 donde el total era 161023,60.
+REGEX_IMPORTE = r"Importe Total:[ \t]*\$\s*([\d,]+(?:\.\d+)?)"
+
+# El CAE son siempre 14 digitos, y pedirlos es lo que deja rotular la linea de
+# cualquier forma sin agarrar otra cosa: hay emisores que escriben "CAE Nº" con
+# la ordinal masculina en vez del simbolo de grado (HUEPIL) y otros que ponen
+# solo "CAE:" (REDONDEL). Sin los 14 digitos, un "Fecha de Vto. de CAE:
+# 11/08/2026" se leeria como CAE 11.
+REGEX_CAE = r"CAE\s*N?[°º]?\s*:?\s*(\d{14})"
 
 # Donde arranca el detalle. Es el ancla comun a todos los ordenes de lectura.
 REGEX_ENCABEZADO_DETALLE = re.compile(r"Producto\s*/\s*Servicio", re.IGNORECASE)
@@ -106,12 +122,13 @@ def extraer_descripcion(text):
 def codigo_arca(text):
     """Codigo de comprobante de ARCA ('011' -> '11').
 
-    El punto de "COD." es opcional y admite coma: sobre una foto, el OCR lee
-    "COD, 011" bastante seguido (FOTO.pdf, 2026-09-13). Sin esto el tipo de
+    El punto de "COD." es opcional y admite coma o dos puntos: sobre una foto,
+    el OCR lee "COD, 011" bastante seguido (FOTO.pdf, 2026-09-13), y hay
+    emisores que lo imprimen "COD: 011" (HUEPIL). Sin esto el tipo de
     comprobante queda sin cargar, que es de los cuatro datos que SISalud
-    necesita si o si, y el comprobante no se puede cargar.
+    necesita si o si.
     """
-    match = re.search(r"COD[.,]?\s*0*(\d+)", text, re.IGNORECASE)
+    match = re.search(r"COD[.,:]?\s*0*(\d+)", text, re.IGNORECASE)
     if match:
         return match.group(1)
     match = re.search(r"Codigo\s*nº\s*(\d+)", text, re.IGNORECASE)
@@ -138,7 +155,10 @@ def punto_venta_y_numero(text):
         nro = re.search(r"Comp\. Nro:\s*(\d+)", text)
         return pv.group(1).lstrip("0"), (nro.group(1).lstrip("0") if nro else None)
 
-    junto = re.search(r"\D*0*(\d{5})\s*-\s*0*(\d{8})", text)
+    # Sin el rotulo de ARCA queda el numero entero ("00003-00019640"), que las
+    # facturas viejas imprimen al lado de "Comprobante N°". El punto de venta
+    # puede venir en cuatro digitos y no en cinco ("0009 - 00071082", REDONDEL).
+    junto = re.search(r"\D*0*(\d{4,5})\s*-\s*0*(\d{8})", text)
     if junto:
         return junto.group(1).lstrip("0"), junto.group(2).lstrip("0")
     return None, None
@@ -177,7 +197,7 @@ def datos_desde_texto(text):
             "Costos queda en CENTRAL y lo elegís vos."
         )
 
-    importe = buscar(text, REGEX_IMPORTE)
+    importe = buscar(text, REGEX_IMPORTE, re.IGNORECASE)
     if not importe:
         avisos.append("No se encontró el 'Importe Total' en la factura.")
 
@@ -200,7 +220,7 @@ def datos_desde_texto(text):
         "fecha_emision": buscar(text, r"Fecha de Emisión:\s*(\d{2}/\d{2}/\d{4})"),
         "fecha_vencimiento": fecha_hasta,
         "fecha_devengamiento": fecha_hasta,
-        "cae": buscar(text, r"CAE N°:\s*(\d+)"),
+        "cae": buscar(text, REGEX_CAE),
         "descripcion": descripcion,
         "importe": importe,
         "domicilio": domicilio,

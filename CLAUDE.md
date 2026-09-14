@@ -55,6 +55,17 @@ confirmar, que es el control de calidad de todo el proceso. Solo se centraliza l
   como Cloud Vision, que agrupa primero todo el texto y después los números). En
   el de filas saca además las seis columnas del renglón, que antes se cargaban en
   SISalud metidas en el medio del texto.
+  Cuatro rótulos admiten variantes, todas medidas contra las muestras el
+  2026-09-14 y ninguna hipotética: `COD.` / `COD,` / `COD:` (HUEPIL imprime los
+  dos puntos, y sin eso el tipo de comprobante quedaba sin leer); el CAE con
+  `N°`, con `Nº` (la ordinal masculina, HUEPIL) o sin nada (REDONDEL, ORELLANO),
+  pidiendo a cambio los **14 dígitos** exactos, que es lo que evita leer como CAE
+  el `11` de "Fecha de Vto. de CAE: 11/08/2026"; el importe sin distinguir
+  mayúsculas pero **con el `$` pegado al rótulo**, porque muchas facturas traen
+  también una columna "Importe Total" en el detalle (`Importe Total:\n$161.023,60`)
+  y el total de verdad es el que lleva el `$` en el mismo renglón (con el regex
+  viejo, ROJAS 712 cargaba 161.023 donde el total era 161023,60); y el número
+  entero con punto de venta de cuatro dígitos además de cinco (`0009 - 00071082`).
 - `extraccion/qr.py`: QR de ARCA (`zxing-cpp`, sin DLL externa como necesitaría
   `pyzbar`). El payload trae CUIT, tipo, punto de venta, número, fecha, importe y CAE
   firmados por ARCA: **pisa** lo que devuelva cualquiera de los dos motores.
@@ -268,6 +279,34 @@ descarga. Eso elimina el `--add-data` de los browsers que hacía falta en el `.e
 - No hay "mover a `cargados/`": en la web no hay una carpeta que mover. El equivalente
   es el estado por comprobante en la cola y el resumen al terminar.
 
+### Comprobantes incompletos: se cargan igual (2026-09-14)
+
+Que falte alguno de los cuatro campos de `CAMPOS_OBLIGATORIOS` **no** deja el
+comprobante afuera. Antes sí: `extraer()` ponía un `error` y la fila quedaba en
+"No se pudo leer", que en la web es un estado sin salida —los campos se pueden
+editar, pero el estado se fijaba al leer y nunca se recalculaba, así que
+completar el tipo a mano no servía de nada y el operador terminaba tipeando de
+cero un comprobante del que ya teníamos el CUIT, las fechas, el importe y el
+detalle—. Ahora es un aviso más y la fila queda en "Revisar".
+
+El único campo que de verdad impide cargar es el **CUIT del emisor**
+(`CAMPO_IMPRESCINDIBLE`): el agente elige al prestador buscándolo por CUIT en el
+prompt de entidades, y sin prestador la pantalla no acepta ningún otro dato. Los
+otros tres se completan en SISalud, que es donde el operador tiene la factura a
+la vista. Sin tipo de comprobante el agente ya sabía qué hacer desde antes —carga
+el resto, **no** clickea `#IMAGE3` y avisa "Agregá la línea del detalle"—, así
+que del lado del agente no hubo nada que cambiar salvo un guarda por si el CUIT
+llega vacío.
+
+- La lista de campos y cuál es el imprescindible los publica el servidor en
+  `/api/opciones`: la regla vive en `modelo.py` y no repetida en el javascript.
+- `Factura.cargable()` pasó a significar "tiene sentido mandarlo al agente"
+  (tiene CUIT), no "está completo"; lo que falta lo dice `faltantes()`.
+- En la web, `estadoLeido()` se recalcula con cada campo que el operador
+  completa, y los que faltan van marcados en ámbar en el formulario.
+
+Sobre las 65 muestras: **0 quedan sin leer** (antes 4) y 2 se cargan sin el tipo.
+
 ### `AutoFiller.py` (escritorio) — congelado
 
 Sigue funcionando y es lo que usan hoy los operadores. Queda hasta que la web esté
@@ -347,6 +386,16 @@ Los `id` de los combos y sus `value` — usar siempre `select_option(value=...)`
 63 PDFs reales, uno duplicado exacto (`sanfeliu 07.pdf` = `SANFELIU 07 - PADIN 1334.pdf`). El nombre del archivo es `<APELLIDO DEL AFILIADO> <mes> - <APELLIDO DEL PRESTADOR> <nro comprobante>`.
 
 Centros de costo confirmados por el usuario para cuatro de ellas: SANFELIU→Olavarría, ANTOLA→Mina Aguilar, ALCIBAR→Tandil, HIDALGO→Barker. Fueron elegidas a propósito como casos especiales, no son una muestra representativa.
+
+**Dos no tienen el formato de ARCA** y conviene tenerlas a mano, porque son las
+únicas de esa forma: `ORELLANO 07 - BLANQUERNA 19640.pdf` y `RODRIGUEZ 07 -
+REDONDEL 71082.pdf` son facturas de talonario preimpreso, con los datos en otro
+orden y otros rótulos (`Comprobante N° : 00003-00019640`, `Importe TOTAL $:
+1058944.79` con punto decimal, `Prestaciones correspondientes al mes de JULIO -
+2026` en vez de `Desde:`/`Hasta:`). Se leen casi enteras, pero ninguna trae el
+`COD. nnn` de ARCA, así que el **tipo de comprobante** no sale de ahí: las dos
+dicen FACTURA y REDONDEL además muestra la letra `C` suelta. Deducirlo de eso es
+una decisión pendiente del usuario; por ahora el tipo lo elige el operador.
 
 **`FOTO.pdf` (2026-09-13) es la primera foto real**, y no es un PDF de ARCA
 aunque la extensión lo diga: es una foto de celular pasada por **CamScanner**,

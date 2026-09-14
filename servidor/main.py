@@ -25,7 +25,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from extraccion import EXTENSIONES_ACEPTADAS, MOTOR, extraer
-from extraccion.modelo import CENTROS_COSTO, NOMBRES_TIPO_COMPROBANTE, Resultado
+from extraccion.modelo import (
+    CAMPO_IMPRESCINDIBLE,
+    CAMPOS_OBLIGATORIOS,
+    CENTROS_COSTO,
+    NOMBRES_TIPO_COMPROBANTE,
+    Resultado,
+)
 from extraccion.ocr import disponible as ocr_disponible
 from extraccion.vision import MODELO, disponible as vision_disponible
 
@@ -64,6 +70,11 @@ class Opciones(BaseModel):
     motor_lectura: str
     modelo_vision: str
     extensiones: list
+    # Que campos marca la web como faltantes, y cual de ellos impide cargar.
+    # Van por aca y no repetidos en el javascript: la regla vive en modelo.py y
+    # en un solo lado.
+    campos_obligatorios: list
+    campo_imprescindible: str
 
 
 def _motor_lectura():
@@ -96,6 +107,8 @@ def opciones():
         motor_lectura=motor,
         modelo_vision=MODELO if vision_disponible() else "",
         extensiones=sorted(EXTENSIONES_ACEPTADAS),
+        campos_obligatorios=list(CAMPOS_OBLIGATORIOS),
+        campo_imprescindible=CAMPO_IMPRESCINDIBLE,
     )
 
 
